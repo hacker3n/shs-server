@@ -1,0 +1,33 @@
+{
+  "+37368000000": {
+    "tags": {
+      "Client bun": 4,
+      "Bacșiș": 3,
+      "Fără probleme": 4
+    },
+    "userTags": {},
+    "reviews": [
+      {
+        "text": "Client foarte de treabă, iese imediat și lasă bacșiș.",
+        "ts": "2026-11-08T08:00:00.000Z",
+        "device_id": "admin",
+        "admin": true
+      }
+    ]
+  },
+  "+37369000000": {
+    "tags": {
+      "Problematic": 2,
+      "Nu răspunde": 1
+    },
+    "userTags": {},
+    "reviews": [
+      {
+        "text": "Nu răspunde la telefon când ajungi la adresă.",
+        "ts": "2026-11-08T08:15:00.000Z",
+        "device_id": "admin",
+        "admin": true
+      }
+    ]
+  }
+}

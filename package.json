@@ -1,0 +1,12 @@
+{
+  "name": "shs-server",
+  "version": "2.6.1",
+  "description": "SHS Server",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}

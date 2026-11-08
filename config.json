@@ -1,0 +1,18 @@
+{
+  "admin_password": "shs2026",
+  "latest_version_code": 34,
+  "latest_version_name": "2.6.1",
+  "min_version_code": 34,
+  "update_url": "https://shs-server.onrender.com/download/SHS_Final.apk",
+  "update_notes": "Versiunea 2.6.1 (a): Suport apeluri clienți în Eyecon/Truecaller, notificare expirare 10 ore, anunțuri instantanee targetate și mod SHS optimizat.",
+  "shared_geocoder": true,
+  "telegram": "neki002",
+  "phone": "",
+  "mia_phone": "",
+  "mia_name": "",
+  "group_url": "https://t.me/neki002",
+  "announcement_id": 1,
+  "announcement_text": "",
+  "announcement_target": "all",
+  "announcement_devices": []
+}
