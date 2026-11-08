@@ -849,9 +849,8 @@ app.post('/api/cancel/status', (req, res) => {
   const netKey = getNetworkKey(req);
   const clientIp = getClientIp(req);
   const now = new Date();
-  const isCancelActive = !dev.blocked && (dev.cancel_expires > now || dev.radar_expires > now);
-  const effectiveCancel = (dev.cancel_expires && dev.cancel_expires > dev.radar_expires) ? dev.cancel_expires : (dev.radar_expires || now);
-  const hoursLeft = isCancelActive ? Math.max(0, Math.ceil((effectiveCancel.getTime() - now.getTime()) / (1000 * 60 * 60))) : 0;
+  const isCancelActive = !dev.blocked && (dev.cancel_expires > now);
+  const hoursLeft = isCancelActive ? Math.max(0, Math.ceil((dev.cancel_expires.getTime() - now.getTime()) / (1000 * 60 * 60))) : 0;
 
   const ipRec = (netKey && ipRegistry[netKey]) || (clientIp && ipRegistry[clientIp]);
   const canTrial = !dev.cancel_trial_used && (!ipRec || !ipRec.cancel_trial_used);
@@ -863,7 +862,7 @@ app.post('/api/cancel/status', (req, res) => {
     hours_left: hoursLeft,
     trial_available: canTrial,
     banned: !!dev.blocked,
-    expires: toIso3(effectiveCancel),
+    expires: toIso3(dev.cancel_expires),
     nonce: req.body.nonce || '',
     ts: Date.now()
   });
