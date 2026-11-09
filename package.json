@@ -1,6 +1,6 @@
 {
   "name": "shs-server",
-  "version": "2.6.1",
+  "version": "1.0",
   "description": "SHS Server",
   "main": "server.js",
   "scripts": {
