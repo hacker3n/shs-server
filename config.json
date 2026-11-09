@@ -1,10 +1,10 @@
 {
   "admin_password": "shs2026",
-  "latest_version_code": 35,
-  "latest_version_name": "2.6.2",
+  "latest_version_code": 36,
+  "latest_version_name": "2.6.3",
   "min_version_code": 34,
   "update_url": "https://shs-server.onrender.com/download/SHS_Final.apk",
-  "update_notes": "Versiunea 2.6.2: Afișare avansată preț/coeficient, gestică 3 atingeri pentru reafișare preț, bacșiș/ceai separat în Cursele mele și stabilitate licență.",
+  "update_notes": "Versiunea 2.6.3: Meniu 'Ceai / Bonus' în Cursele mele, Smart Backup securizat, afișare avansată preț/coeficient și gestică 3 atingeri.",
   "shared_geocoder": true,
   "telegram": "neki002",
   "phone": "",
