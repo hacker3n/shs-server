@@ -568,11 +568,11 @@ function loadConfig() {
     console.error('Eroare la încărcarea config.json:', e.message);
   }
   return {
-    latest_version_code: 34,
-    latest_version_name: "2.6.1",
+    latest_version_code: 35,
+    latest_version_name: "2.6.2",
     min_version_code: 34,
     update_url: "https://shs-server.onrender.com/download/SHS_Final.apk",
-    update_notes: "Versiunea 2.6.1: Suport complet apeluri clienți în Eyecon, Truecaller și alte dialere; remediere Otmena (anulare automată); sincronizare strictă rețea.",
+    update_notes: "Versiunea 2.6.2: Afișare avansată preț/coeficient, gestică 3 atingeri pentru reafișare preț, bacșiș/ceai separat în Cursele mele și stabilitate licență.",
     shared_geocoder: true,
     telegram: "neki002",
     phone: "",
