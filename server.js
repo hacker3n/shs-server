@@ -484,14 +484,26 @@ function getOrCreateDevice(deviceId, deviceInfo = '', req = null) {
     if (netKey) dev.netKey = netKey;
     if (deviceInfo && (!dev.info || dev.info === 'Telefon nou')) dev.info = deviceInfo;
 
-    // Sincronizare cu rețeaua: dacă adminul a modificat rețeaua, telefonul primește noua dată
+    // Sincronizare inteligentă cu rețeaua (se păstrează cea mai avansată dată de expirare):
     if (ipRec) {
-      if (ipRec.radar_expires) {
-        dev.radar_expires = new Date(ipRec.radar_expires);
+      const ipRadarTime = ipRec.radar_expires ? new Date(ipRec.radar_expires).getTime() : 0;
+      const devRadarTime = dev.radar_expires ? new Date(dev.radar_expires).getTime() : 0;
+      if (ipRadarTime > devRadarTime) {
+        dev.radar_expires = new Date(ipRadarTime);
+      } else if (devRadarTime > ipRadarTime) {
+        ipRec.radar_expires = dev.radar_expires;
+        saveIpRegistry();
       }
-      if (ipRec.cancel_expires) {
-        dev.cancel_expires = new Date(ipRec.cancel_expires);
+
+      const ipCancelTime = ipRec.cancel_expires ? new Date(ipRec.cancel_expires).getTime() : 0;
+      const devCancelTime = dev.cancel_expires ? new Date(dev.cancel_expires).getTime() : 0;
+      if (ipCancelTime > devCancelTime) {
+        dev.cancel_expires = new Date(ipCancelTime);
+      } else if (devCancelTime > ipCancelTime) {
+        ipRec.cancel_expires = dev.cancel_expires;
+        saveIpRegistry();
       }
+
       if (ipRec.blocked) {
         dev.blocked = true;
       }
