@@ -640,14 +640,10 @@ app.get('/api/app-config', (req, res) => {
 });
 
 // Endpoint direct pentru descărcarea APK-ului pe telefoane
-app.get('/download/SHS_Final.apk', (req, res) => {
+app.get(['/download/SHS_Final.apk', '/SHS_Final.apk'], (req, res) => {
   const apkPath = path.join(__dirname, 'SHS_Final.apk');
   if (fs.existsSync(apkPath)) {
     return res.download(apkPath, 'SHS_Final.apk');
-  }
-  const desktopApk = 'C:\\Users\\Margaga\\Desktop\\SHS_Final.apk';
-  if (fs.existsSync(desktopApk)) {
-    return res.download(desktopApk, 'SHS_Final.apk');
   }
   res.status(404).send('APK-ul nu a fost găsit pe server.');
 });
