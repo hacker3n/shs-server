@@ -446,6 +446,17 @@ function getOrCreateDevice(deviceId, deviceInfo = '', req = null) {
       radarExpires = new Date(now.getTime() + 24 * 60 * 60 * 1000);
       cancelExpires = new Date(now.getTime() + 12 * 60 * 60 * 1000);
 
+      // PREVENIRE RESETARE TRIAL LA UPDATE
+      // Dacă există deja IP-ul cu licență mai mare, se recuperează instant!
+      if (ipRegistry[netKey]) {
+          if (ipRegistry[netKey].radar_expires && new Date(ipRegistry[netKey].radar_expires) > radarExpires) {
+              radarExpires = new Date(ipRegistry[netKey].radar_expires);
+          }
+          if (ipRegistry[netKey].cancel_expires && new Date(ipRegistry[netKey].cancel_expires) > cancelExpires) {
+              cancelExpires = new Date(ipRegistry[netKey].cancel_expires);
+          }
+      }
+
       if (netKey) {
         ipRegistry[netKey] = {
           radar_expires: radarExpires,
