@@ -579,11 +579,11 @@ function loadConfig() {
     console.error('Eroare la încărcarea config.json:', e.message);
   }
   return {
-    latest_version_code: 37,
-    latest_version_name: "1.0 (a)",
+    latest_version_code: 38,
+    latest_version_name: "1.0 (b)",
     min_version_code: 1,
     update_url: "https://shs-server.onrender.com/download/SHS_Final.apk",
-    update_notes: "Versiunea 1.0 (a): Smart Backup, afișare prețuri cu zecimale în Cursele mele, meniu 3 puncte Ceai/Bonus, gestică 3 atingeri și restaurare automată.",
+    update_notes: "Versiunea 1.0 (b): Corectare crash backup, afișare corectă prețuri cu zecimale în Cursele mele, meniu 3 puncte Ceai/Bonus.",
     shared_geocoder: true,
     telegram: "neki002",
     phone: "",
