@@ -579,11 +579,11 @@ function loadConfig() {
     console.error('Eroare la încărcarea config.json:', e.message);
   }
   return {
-    latest_version_code: 38,
-    latest_version_name: "1.0 (b)",
+    latest_version_code: 39,
+    latest_version_name: "1.0 (c)",
     min_version_code: 1,
     update_url: "https://shs-server.onrender.com/download/SHS_Final.apk",
-    update_notes: "Versiunea 1.0 (b): Corectare crash backup, afișare corectă prețuri cu zecimale în Cursele mele, meniu 3 puncte Ceai/Bonus.",
+    update_notes: "Versiunea 1.0 (c): Fix închidere/crash automat (ART VerifyError), salvare stabilă backup, afișare prețuri zecimale cu Ceai/Bonus, reamintire preț cursă la triplă apăsare.",
     shared_geocoder: true,
     telegram: "neki002",
     phone: "",
