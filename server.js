@@ -579,7 +579,7 @@ function loadConfig() {
     console.error('Eroare la încărcarea config.json:', e.message);
   }
   return {
-    latest_version_code: 39,
+    latest_version_code: 1,
     latest_version_name: "1.0 (c)",
     min_version_code: 1,
     update_url: "https://shs-server.onrender.com/download/SHS_Final.apk",
