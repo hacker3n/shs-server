@@ -337,32 +337,8 @@ function applyExpirationToDeviceAndIp(dev, type, newRadarDate, newCancelDate) {
     dev.cancel_trial_used = true;
   }
 
-  const netKey = dev.netKey || (dev.ip ? (dev.ip.includes(':') ? dev.ip.split(':').slice(0, 4).join(':') + '::/64' : dev.ip.split(':')[0]) : null);
-
-  if (netKey) {
-    ipRegistry[netKey] = {
-      ...(ipRegistry[netKey] || {}),
-      radar_expires: dev.radar_expires,
-      cancel_expires: dev.cancel_expires,
-      trial_used: true,
-      cancel_trial_used: true,
-      blocked: !!dev.blocked,
-      last_device: dev.id
-    };
-    saveIpRegistry();
-
-    // SINCRONIZARE AUTOMATĂ: Toate telefoanele de pe același IP/rețea primesc INSTANT aceeași expirare!
-    Object.values(devices).forEach(otherDev => {
-      const otherNet = otherDev.netKey || (otherDev.ip ? (otherDev.ip.includes(':') ? otherDev.ip.split(':').slice(0, 4).join(':') + '::/64' : otherDev.ip.split(':')[0]) : null);
-      if (otherNet === netKey) {
-        if (newRadarDate) otherDev.radar_expires = newRadarDate;
-        if (newCancelDate) otherDev.cancel_expires = newCancelDate;
-        otherDev.trial_used = true;
-        otherDev.cancel_trial_used = true;
-      }
-    });
-  }
-
+  // Fiecare telefon își păstrează strict propriul abonament independent!
+  // Nu suprascriem alte dispozitive pe baza aceluiași IP/rețea mobilă partajată.
   saveDevices();
 }
 
@@ -372,34 +348,12 @@ function getOrCreateDevice(deviceId, deviceInfo = '', req = null) {
   const netKey = getNetworkKey(req);
   const now = new Date();
 
-  // 1. Căutăm rețeaua în ipRegistry
-  let ipRec = (netKey && ipRegistry[netKey]) || (clientIp && ipRegistry[clientIp]) || null;
+  // Verificare dacă IP-ul / subnet-ul a folosit deja trial-ul inițial
+  const ipRec = (netKey && ipRegistry[netKey]) || (clientIp && ipRegistry[clientIp]) || null;
+  const ipUsedTrial = !!(ipRec && (ipRec.trial_used || (ipRec.devices && ipRec.devices.length > 0)));
 
-  // 2. Căutăm și în lista tuturor telefoanelor existente dacă au aceeași rețea sau același IP
-  if (!ipRec && (netKey || clientIp)) {
-    const existingDevWithIp = Object.values(devices).find(d => {
-      if (d.id === deviceId) return false;
-      const dNet = d.netKey || (d.ip ? (d.ip.includes(':') ? d.ip.split(':').slice(0, 4).join(':') + '::/64' : d.ip.split(':')[0]) : null);
-      return (netKey && dNet === netKey) || (clientIp && d.ip === clientIp);
-    });
-    if (existingDevWithIp) {
-      ipRec = {
-        radar_expires: new Date(existingDevWithIp.radar_expires),
-        cancel_expires: new Date(existingDevWithIp.cancel_expires),
-        trial_used: true,
-        cancel_trial_used: true,
-        blocked: !!existingDevWithIp.blocked,
-        devices: [existingDevWithIp.id]
-      };
-      if (netKey) ipRegistry[netKey] = ipRec;
-      if (clientIp) ipRegistry[clientIp] = ipRec;
-      saveIpRegistry();
-    }
-  }
-
-  // VERIFICARE DISPOZITIV ȘTERS (după Device ID sau după Rețea/IP)
-  const isDeleted = (deletedDevices[deviceId] && deletedDevices[deviceId].deleted) ||
-                    (ipRec && ipRec.deleted);
+  // VERIFICARE DISPOZITIV ȘTERS (strict după Device ID unic)
+  const isDeleted = (deletedDevices[deviceId] && deletedDevices[deviceId].deleted);
 
   if (isDeleted) {
     const del = deletedDevices[deviceId] || {
@@ -407,8 +361,8 @@ function getOrCreateDevice(deviceId, deviceInfo = '', req = null) {
       ip: clientIp,
       netKey: netKey,
       info: deviceInfo || 'Telefon șters',
-      radar_expires: (ipRec && ipRec.radar_expires) ? new Date(ipRec.radar_expires) : now,
-      cancel_expires: (ipRec && ipRec.cancel_expires) ? new Date(ipRec.cancel_expires) : now,
+      radar_expires: now,
+      cancel_expires: now,
       trial_used: true,
       cancel_trial_used: true,
       blocked: false,
@@ -425,45 +379,29 @@ function getOrCreateDevice(deviceId, deviceInfo = '', req = null) {
   }
 
   if (!devices[deviceId]) {
-    // DISPOZITIV NOU (sau date șterse / aplicație reinstalată):
+    // DISPOZITIV NOU:
     let radarExpires;
     let cancelExpires;
-    let isBlocked = false;
 
-    if (ipRec) {
-      // DACĂ IP-UL A FOST DEJA FOLOSIT:
-      // Al doilea telefon (sau reinstalarea) primește EXACT timpul rămas de la primul!
-      radarExpires = new Date(ipRec.radar_expires || now);
-      cancelExpires = new Date(ipRec.cancel_expires || now);
-      isBlocked = !!ipRec.blocked;
-      if (!ipRec.devices) ipRec.devices = [];
-      if (!ipRec.devices.includes(deviceId)) {
-        ipRec.devices.push(deviceId);
-        saveIpRegistry();
-      }
+    if (ipUsedTrial) {
+      // Trial deja consumat pe acest IP/rețea -> începe expirat (trebuie activat de admin)
+      radarExpires = new Date(now.getTime());
+      cancelExpires = new Date(now.getTime());
     } else {
       // Dispozitiv și IP complet nou: acordăm trial inițial (24 ore radar, 12 ore anulare)
       radarExpires = new Date(now.getTime() + 24 * 60 * 60 * 1000);
       cancelExpires = new Date(now.getTime() + 12 * 60 * 60 * 1000);
 
-      // PREVENIRE RESETARE TRIAL LA UPDATE
-      // Dacă există deja IP-ul cu licență mai mare, se recuperează instant!
-      if (ipRegistry[netKey]) {
-          if (ipRegistry[netKey].radar_expires && new Date(ipRegistry[netKey].radar_expires) > radarExpires) {
-              radarExpires = new Date(ipRegistry[netKey].radar_expires);
-          }
-          if (ipRegistry[netKey].cancel_expires && new Date(ipRegistry[netKey].cancel_expires) > cancelExpires) {
-              cancelExpires = new Date(ipRegistry[netKey].cancel_expires);
-          }
-      }
-
       if (netKey) {
         ipRegistry[netKey] = {
-          radar_expires: radarExpires,
-          cancel_expires: cancelExpires,
           trial_used: true,
-          cancel_trial_used: true,
-          blocked: false,
+          devices: [deviceId]
+        };
+        saveIpRegistry();
+      }
+      if (clientIp && clientIp !== netKey) {
+        ipRegistry[clientIp] = {
+          trial_used: true,
           devices: [deviceId]
         };
         saveIpRegistry();
@@ -479,7 +417,7 @@ function getOrCreateDevice(deviceId, deviceInfo = '', req = null) {
       cancel_expires: cancelExpires,
       trial_used: true,
       cancel_trial_used: true,
-      blocked: isBlocked,
+      blocked: false,
       hidden: false,
       last_seen: now
     };
@@ -495,45 +433,16 @@ function getOrCreateDevice(deviceId, deviceInfo = '', req = null) {
     if (netKey) dev.netKey = netKey;
     if (deviceInfo && (!dev.info || dev.info === 'Telefon nou')) dev.info = deviceInfo;
 
-    // Sincronizare inteligentă cu rețeaua (se păstrează cea mai avansată dată de expirare):
-    if (ipRec) {
-      const ipRadarTime = ipRec.radar_expires ? new Date(ipRec.radar_expires).getTime() : 0;
-      const devRadarTime = dev.radar_expires ? new Date(dev.radar_expires).getTime() : 0;
-      if (ipRadarTime > devRadarTime) {
-        dev.radar_expires = new Date(ipRadarTime);
-      } else if (devRadarTime > ipRadarTime) {
-        ipRec.radar_expires = dev.radar_expires;
-        saveIpRegistry();
-      }
-
-      const ipCancelTime = ipRec.cancel_expires ? new Date(ipRec.cancel_expires).getTime() : 0;
-      const devCancelTime = dev.cancel_expires ? new Date(dev.cancel_expires).getTime() : 0;
-      if (ipCancelTime > devCancelTime) {
-        dev.cancel_expires = new Date(ipCancelTime);
-      } else if (devCancelTime > ipCancelTime) {
-        ipRec.cancel_expires = dev.cancel_expires;
-        saveIpRegistry();
-      }
-
-      if (ipRec.blocked) {
-        dev.blocked = true;
-      }
-      if (!ipRec.devices) ipRec.devices = [];
-      if (!ipRec.devices.includes(deviceId)) {
-        ipRec.devices.push(deviceId);
-        saveIpRegistry();
-      }
-    } else if (netKey) {
-      ipRegistry[netKey] = {
-        radar_expires: dev.radar_expires,
-        cancel_expires: dev.cancel_expires,
-        trial_used: true,
-        cancel_trial_used: true,
-        blocked: !!dev.blocked,
-        devices: [deviceId]
-      };
-      saveIpRegistry();
+    // Asigurăm că datele sunt instanțe Date valide
+    if (!(dev.radar_expires instanceof Date) || isNaN(dev.radar_expires.getTime())) {
+      dev.radar_expires = new Date(dev.radar_expires || now);
     }
+    if (!(dev.cancel_expires instanceof Date) || isNaN(dev.cancel_expires.getTime())) {
+      dev.cancel_expires = new Date(dev.cancel_expires || now);
+    }
+
+    // NICIODATĂ nu suprascriem dev.radar_expires sau dev.cancel_expires cu date din IP!
+    // Expirarea setată de admin rămâne neschimbată și stabilă.
     saveDevices();
   }
 
@@ -571,28 +480,46 @@ function getOrCreateDevice(deviceId, deviceInfo = '', req = null) {
 const CONFIG_FILE = path.join(__dirname, 'config.json');
 
 function loadConfig() {
+  let cfg = null;
   try {
     if (fs.existsSync(CONFIG_FILE)) {
-      return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+      cfg = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
     }
   } catch (e) {
     console.error('Eroare la încărcarea config.json:', e.message);
   }
-  return {
-    latest_version_code: 1,
-    latest_version_name: "1.0 (c)",
-    min_version_code: 1,
-    update_url: "https://shs-server.onrender.com/download/SHS_Final.apk",
-    update_notes: "Versiunea 1.0 (c): Fix închidere/crash automat (ART VerifyError), salvare stabilă backup, afișare prețuri zecimale cu Ceai/Bonus, reamintire preț cursă la triplă apăsare.",
-    shared_geocoder: true,
-    telegram: "neki002",
-    phone: "",
-    mia_phone: "",
-    mia_name: "",
-    group_url: "https://t.me/neki002",
-    announcement_id: 1,
-    announcement_text: ""
-  };
+  if (!cfg) {
+    cfg = {
+      admin_password: "shs2026",
+      latest_version_code: 1,
+      latest_version_name: "1.0",
+      min_version_code: 1,
+      update_url: "https://shs-server.onrender.com/download/SHS_Final.apk",
+      update_notes: "Versiunea 1.0: Radar stabil, deconectare automată la expirare, interfață nouă compactă.",
+      shared_geocoder: true,
+      telegram: "neki002",
+      phone: "",
+      mia_phone: "",
+      mia_name: "",
+      group_url: "https://t.me/neki002",
+      announcement_id: 1,
+      announcement_text: ""
+    };
+  }
+
+  // Suport variabile de mediu (pentru Render sau Docker când discul este efemer)
+  if (process.env.LATEST_VERSION_CODE) {
+    const envCode = parseInt(process.env.LATEST_VERSION_CODE, 10);
+    if (!isNaN(envCode) && envCode > 0) cfg.latest_version_code = envCode;
+  }
+  if (process.env.LATEST_VERSION_NAME) {
+    cfg.latest_version_name = process.env.LATEST_VERSION_NAME.trim();
+  }
+  if (process.env.ADMIN_PASSWORD) {
+    cfg.admin_password = process.env.ADMIN_PASSWORD.trim();
+  }
+
+  return cfg;
 }
 
 function saveConfig() {
@@ -810,7 +737,6 @@ app.post('/api/request-trial', (req, res) => {
   if (netKey) {
     ipRegistry[netKey] = {
       ...(ipRegistry[netKey] || {}),
-      radar_expires: dev.radar_expires,
       trial_used: true,
       devices: [dev.id]
     };
@@ -2177,6 +2103,15 @@ app.get('/', (req, res) => {
           }, 2600);
         }
 
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('msg') === 'version_updated') {
+          showToast('Versiunea aplicației a fost actualizată cu succes!');
+          window.history.replaceState({}, document.title, window.location.pathname);
+        } else if (urlParams.get('msg') === 'password_changed') {
+          showToast('Parola panoului a fost schimbată cu succes!');
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }
+
         function copyId(id) {
           if (!id) return;
           if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -3083,12 +3018,44 @@ app.post('/admin/update-remote-config', (req, res) => {
 // Actualizare versiune APK (In-App Update)
 app.post('/admin/update-version', (req, res) => {
   if (!isAuthenticated(req)) return res.redirect('/');
-  appConfig.latest_version_code = parseInt(req.body.latest_version_code);
-  appConfig.latest_version_name = req.body.latest_version_name;
-  appConfig.update_url = req.body.update_url;
-  appConfig.update_notes = req.body.update_notes || '';
+  const vCode = parseInt(req.body.latest_version_code, 10);
+  if (!isNaN(vCode) && vCode > 0) {
+    appConfig.latest_version_code = vCode;
+  }
+  if (req.body.latest_version_name) {
+    appConfig.latest_version_name = String(req.body.latest_version_name).trim();
+  }
+  if (req.body.update_url) {
+    appConfig.update_url = String(req.body.update_url).trim();
+  }
+  appConfig.update_notes = String(req.body.update_notes || '').trim();
   saveConfig();
-  res.redirect('/');
+  res.redirect('/?msg=version_updated');
+});
+
+// Endpoint Live Set Version (AJAX)
+app.post('/api/admin/set-version', (req, res) => {
+  try {
+    if (!isAuthenticated(req)) return res.status(401).json({ error: 'Neautorizat' });
+    const { latest_version_code, latest_version_name, update_url, update_notes } = req.body;
+    const vCode = parseInt(latest_version_code, 10);
+    if (!isNaN(vCode) && vCode > 0) {
+      appConfig.latest_version_code = vCode;
+    }
+    if (latest_version_name) {
+      appConfig.latest_version_name = String(latest_version_name).trim();
+    }
+    if (update_url) {
+      appConfig.update_url = String(update_url).trim();
+    }
+    if (update_notes !== undefined) {
+      appConfig.update_notes = String(update_notes).trim();
+    }
+    saveConfig();
+    res.json({ ok: true, config: appConfig });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Endpoint Live Set Expiration (Setare exactă dată și oră sau adăugare zile)
@@ -3262,18 +3229,6 @@ app.post('/api/admin/delete-device', (req, res) => {
       deletedAt: new Date().toISOString()
     };
     saveDeletedDevices();
-
-    // Marcăm rețeaua și IP-ul ca aparținând unui dispozitiv șters
-    if (dev.netKey && ipRegistry[dev.netKey]) {
-      ipRegistry[dev.netKey].deleted = true;
-      ipRegistry[dev.netKey].deletedDeviceId = id;
-      saveIpRegistry();
-    }
-    if (dev.ip && ipRegistry[dev.ip]) {
-      ipRegistry[dev.ip].deleted = true;
-      ipRegistry[dev.ip].deletedDeviceId = id;
-      saveIpRegistry();
-    }
 
     delete devices[id];
     saveDevices();
