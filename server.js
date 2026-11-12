@@ -81,7 +81,12 @@ loadConfig();
 // -------------------------------------------------
 // Autentificare – token cookie / header / query
 // -------------------------------------------------
-function getCookie(req,name){ const m=(req.headers&&req.headers.cookie?req.headers.cookie:'').match(new RegExp('(?:^|; )'+name.replace(/([\\.$?*|{}\\[\\]\\\\\\/\\+^])/g,'\\$1')+'=([^;]*)')); return m?decodeURIComponent(m[1]):undefined; }
+function getCookie(req, name) {
+  const cookieHeader = req.headers && req.headers.cookie ? req.headers.cookie : '';
+  const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = cookieHeader.match(new RegExp('(?:^|; )' + escapedName + '=([^;]*)'));
+  return match ? decodeURIComponent(match[1]) : undefined;
+}
 function getExpectedToken(){ return Buffer.from('shs_auth_'+adminPassword).toString('base64'); }
 function isAuthenticated(req){ const expected=getExpectedToken(); const token=getCookie(req,'shs_admin_session'); if(token&&token===expected) return true; if(req&&req.headers){ if(req.headers['x-admin-token']===expected) return true; if(req.headers['authorization']==='Bearer '+expected) return true; } if(req&&req.query){ if(req.query.auth===expected||req.query.token===expected) return true; } return false; }
 
