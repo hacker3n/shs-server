@@ -3,6 +3,7 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 
+const persist = require('./persist');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -37,7 +38,7 @@ function loadIpRegistry() {
 
 function saveIpRegistry() {
   try {
-    fs.writeFileSync(IP_FILE, JSON.stringify(ipRegistry, null, 2), 'utf8');
+    persist.save('ip_registry', ipRegistry, IP_FILE);
   } catch (e) {
     console.error('Eroare la salvarea ip_registry.json:', e.message);
   }
@@ -70,7 +71,7 @@ function loadDevices() {
 
 function saveDevices() {
   try {
-    fs.writeFileSync(DB_FILE, JSON.stringify(devices, null, 2), 'utf8');
+    persist.save('devices', devices, DB_FILE);
   } catch (e) {
     console.error('Eroare la salvarea devices.json:', e.message);
   }
@@ -102,7 +103,7 @@ function loadDeletedDevices() {
 
 function saveDeletedDevices() {
   try {
-    fs.writeFileSync(DELETED_DB_FILE, JSON.stringify(deletedDevices, null, 2), 'utf8');
+    persist.save('deleted', deletedDevices, DELETED_DB_FILE);
   } catch (e) {
     console.error('Eroare la salvarea deleted_devices.json:', e.message);
   }
@@ -163,7 +164,7 @@ function loadClients() {
 
 function saveClients() {
   try {
-    fs.writeFileSync(CLIENTS_FILE, JSON.stringify(clients, null, 2), 'utf8');
+    persist.save('clients', clients, CLIENTS_FILE);
   } catch (e) {
     console.error('Eroare la salvarea clients.json:', e.message);
   }
@@ -524,7 +525,7 @@ function loadConfig() {
 
 function saveConfig() {
   try {
-    fs.writeFileSync(CONFIG_FILE, JSON.stringify(appConfig, null, 2), 'utf8');
+    persist.save('config', appConfig, CONFIG_FILE);
   } catch (e) {
     console.error('Eroare la salvarea config.json:', e.message);
   }
@@ -3470,6 +3471,52 @@ app.get('/api/admin/crashes', (req, res) => {
   res.json({ ok: true, count: recentCrashes.length, crashes: recentCrashes });
 });
 
-app.listen(PORT, () => {
-  console.log(`Serverul SHS rulează pe portul ${PORT}`);
-});
+(async () => {
+  try {
+    await persist.init();
+
+    const d = await persist.load('devices', DB_FILE);
+    if (d) {
+      for (const k in d) {
+        d[k].radar_expires = new Date(d[k].radar_expires);
+        d[k].cancel_expires = new Date(d[k].cancel_expires);
+        d[k].last_seen = new Date(d[k].last_seen || Date.now());
+        d[k].hidden = !!d[k].hidden;
+      }
+      devices = d;
+    }
+    const ip = await persist.load('ip_registry', IP_FILE);
+    if (ip) ipRegistry = ip;
+    const del = await persist.load('deleted', DELETED_DB_FILE);
+    if (del) {
+      for (const k in del) {
+        del[k].radar_expires = new Date(del[k].radar_expires);
+        del[k].cancel_expires = new Date(del[k].cancel_expires);
+        del[k].deleted = true;
+      }
+      deletedDevices = del;
+    }
+    const cl = await persist.load('clients', CLIENTS_FILE);
+    if (cl) clients = cl;
+    const cfg = await persist.load('config', CONFIG_FILE);
+    if (cfg) {
+      appConfig = Object.assign({}, appConfig, cfg);
+      if (process.env.ADMIN_PASSWORD) appConfig.admin_password = process.env.ADMIN_PASSWORD.trim();
+      if (appConfig.admin_password) adminPassword = appConfig.admin_password;
+    }
+  } catch (e) {
+    console.error('Eroare la încărcarea datelor:', e.message);
+  }
+
+  process.on('SIGTERM', async () => {
+    await persist.flushAll({
+      devices: () => devices, ip_registry: () => ipRegistry,
+      deleted: () => deletedDevices, clients: () => clients, config: () => appConfig
+    });
+    process.exit(0);
+  });
+
+  app.listen(PORT, () => {
+    console.log(`Serverul SHS rulează pe portul ${PORT}`);
+  });
+})();
