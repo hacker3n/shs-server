@@ -367,7 +367,11 @@ function applyExpirationToDeviceAndIp(dev, type, newRadarDate, newCancelDate) {
 
   // Fiecare telefon își păstrează strict propriul abonament independent!
   // Nu suprascriem alte dispozitive pe baza aceluiași IP/rețea mobilă partajată.
-  saveDevices();
+  if (dev.deleted) {
+    saveDeletedDevices();
+  } else {
+    saveDevices();
+  }
 }
 
 // ==========================================
@@ -1504,14 +1508,28 @@ app.get('/', (req, res) => {
     dev.radar_expires = ensureDate(dev.radar_expires);
     dev.cancel_expires = ensureDate(dev.cancel_expires);
     dev.last_seen = ensureDate(dev.last_seen);
+    dev.deleted = false;
   });
+
+  let deletedList = Object.values(deletedDevices || {});
+  deletedList.forEach(dev => {
+    dev.radar_expires = ensureDate(dev.radar_expires);
+    dev.cancel_expires = ensureDate(dev.cancel_expires);
+    dev.last_seen = ensureDate(dev.last_seen);
+    dev.deleted = true;
+  });
+
   devicesList.sort((a, b) => b.last_seen.getTime() - a.last_seen.getTime());
+  deletedList.sort((a, b) => {
+    const timeA = a.deletedAt ? new Date(a.deletedAt).getTime() : a.last_seen.getTime();
+    const timeB = b.deletedAt ? new Date(b.deletedAt).getTime() : b.last_seen.getTime();
+    return timeB - timeA;
+  });
 
   let activeRadarCount = 0;
   let activeCancelCount = 0;
   let blockedCount = 0;
   let onlineCount = 0;
-  let hiddenCount = 0;
   let inactive24hCount = 0;
   let activeRecentCount = 0;
 
@@ -1521,21 +1539,20 @@ app.get('/', (req, res) => {
     if (!dev.blocked && dev.cancel_expires > now) activeCancelCount++;
     const diffMs = now.getTime() - dev.last_seen.getTime();
     if (diffMs < 12 * 1000 && !dev.is_offline) onlineCount++;
-    if (dev.hidden) {
-      hiddenCount++;
+    if (diffMs > 24 * 60 * 60 * 1000) {
+      inactive24hCount++;
     } else {
-      if (diffMs > 24 * 60 * 60 * 1000) {
-        inactive24hCount++;
-      } else {
-        activeRecentCount++;
-      }
+      activeRecentCount++;
     }
   });
 
-  const ipShare = {};
-  devicesList.forEach(d => { const k = d.netKey || d.ip; if (k) ipShare[k] = (ipShare[k] || 0) + 1; });
+  const allDisplayDevices = [...devicesList, ...deletedList];
 
-  let rows = devicesList.map(dev => {
+  const ipShare = {};
+  allDisplayDevices.forEach(d => { const k = d.netKey || d.ip; if (k) ipShare[k] = (ipShare[k] || 0) + 1; });
+
+  let rows = allDisplayDevices.map(dev => {
+    const isDevDeleted = !!dev.deleted;
     const radarMs = dev.radar_expires.getTime() - now.getTime();
     const radarDays = Math.max(0, Math.ceil(radarMs / (1000 * 60 * 60 * 24)));
 
@@ -1547,7 +1564,7 @@ app.get('/', (req, res) => {
     const cancelStatusClass = cancelHours > 24 ? 'badge-cyan' : (cancelHours > 0 ? 'badge-yellow' : 'badge-red');
 
     const diffMs = now.getTime() - dev.last_seen.getTime();
-    const isOnline = (diffMs < 12 * 1000) && !dev.is_offline;
+    const isOnline = !isDevDeleted && (diffMs < 12 * 1000) && !dev.is_offline;
     const diffSec = Math.floor(diffMs / 1000);
     let lastSeenText = "Chiar acum";
     if (diffSec >= 60 && diffSec < 3600) {
@@ -1562,18 +1579,34 @@ app.get('/', (req, res) => {
     const eid = esc(dev.id);
     const jid = jsq(dev.id);
     const quickSel = (type) => `<select class="quick-sel" onchange="quickAddSel('${jid}', '${type}', this)" title="Adaugă timp"><option value="">＋</option><option value="h1">+1h</option><option value="d1">+1z</option><option value="d7">+7z</option><option value="d30">+30z</option></select>`;
-    const onlineHtml = isOnline
-      ? '<span class="st on"><i></i>Online</span>'
-      : '<span class="st"><i></i>Offline · ' + esc(lastSeenText) + '</span>';
+    const onlineHtml = isDevDeleted
+      ? '<span class="st" style="color:#ef4444;"><i style="background:#ef4444;"></i>Șters</span>'
+      : (isOnline
+        ? '<span class="st on"><i></i>Online</span>'
+        : '<span class="st"><i></i>Offline · ' + esc(lastSeenText) + '</span>');
+
+    const statusBadge = isDevDeleted
+      ? '<span id="badge-status-' + eid + '" class="badge badge-red">ȘTERS</span>'
+      : ('<span id="badge-status-' + eid + '" class="badge ' + (dev.blocked ? 'badge-red' : 'badge-green') + '">' + (dev.blocked ? 'BLOCAT' : 'ACTIV') + '</span>');
+
+    const actionsHtml = isDevDeleted
+      ? `<div class="act-row">
+           <button type="button" onclick="restoreDeviceLive('${jid}')" id="btn-restore-${eid}" class="btn-action btn-restore" title="Restaurează telefonul în lista activă">♻️ Restaurează</button>
+           <button type="button" class="btn-pill btn-del" onclick="permanentDeleteDeviceLive('${jid}')" title="Șterge definitiv din baza de date">🗑️ Definitiv</button>
+         </div>`
+      : `<div class="act-row">
+           <button type="button" onclick="toggleBlockLive('${jid}')" id="btn-block-${eid}" class="btn-action ${dev.blocked ? 'btn-unblock' : 'btn-block'}">${dev.blocked ? 'Deblochează' : 'Blochează'}</button>
+           <button type="button" class="btn-pill btn-map" onclick="focusDeviceOnMap('${jid}')" title="Arată pe hartă">🗺️</button>
+           <button type="button" class="btn-pill btn-del" onclick="deleteDeviceLive('${jid}')" title="Șterge telefonul (mută în coș/șterse)">❌</button>
+         </div>`;
 
     return `
-      <tr class="device-row ${dev.blocked ? 'is-blocked' : ''}" id="row-${eid}" data-id="${eid}" data-hidden="${dev.hidden ? 'true' : 'false'}" data-lastseen="${dev.last_seen.getTime()}">
+      <tr class="device-row ${dev.blocked ? 'is-blocked' : ''} ${isDevDeleted ? 'is-deleted' : ''}" id="row-${eid}" data-id="${eid}" data-deleted="${isDevDeleted ? 'true' : 'false'}" data-lastseen="${dev.last_seen.getTime()}">
         <td class="c-dev" data-label="Telefon">
           <div class="dev-top">
             <span class="device-id" id="id-${eid}">${eid}</span>
             <button type="button" class="btn-copy" onclick="copyId('${jid}')" title="Copiază ID">📋</button>
-            <span id="badge-status-${eid}" class="badge ${dev.blocked ? 'badge-red' : 'badge-green'}">${dev.blocked ? 'BLOCAT' : 'ACTIV'}</span>
-            ${dev.uninstalled ? '<span class="badge badge-red">ștearsă</span>' : ''}
+            ${statusBadge}
           </div>
           <div class="dev-model">${esc(dev.info || 'Necunoscut')}<span class="ver">v${esc(dev.app_version || '2.6.1')}</span></div>
           <div class="dev-meta">
@@ -1608,18 +1641,13 @@ app.get('/', (req, res) => {
           </div>
         </td>
         <td class="c-act" data-label="Acțiuni">
-          <div class="act-row">
-            <button type="button" onclick="toggleBlockLive('${jid}')" id="btn-block-${eid}" class="btn-action ${dev.blocked ? 'btn-unblock' : 'btn-block'}">${dev.blocked ? 'Deblochează' : 'Blochează'}</button>
-            <button type="button" class="btn-pill btn-map" onclick="focusDeviceOnMap('${jid}')" title="Arată pe hartă">🗺️</button>
-            <button type="button" class="btn-pill" id="btn-hide-${eid}" onclick="toggleHideLive('${jid}')" style="color:${dev.hidden ? '#4ade80' : '#f87171'};" title="${dev.hidden ? 'Restaurează dispozitivul' : 'Ascunde telefonul dezinstalat'}">${dev.hidden ? '👁️' : '🗑️'}</button>
-            <button type="button" class="btn-pill btn-del" onclick="deleteDeviceLive('${jid}')" title="Șterge definitiv">❌</button>
-          </div>
+          ${actionsHtml}
         </td>
       </tr>
     `;
   }).join('');
 
-  if (devicesList.length === 0) {
+  if (allDisplayDevices.length === 0) {
     rows = `<tr><td colspan="4" style="padding: 30px; text-align: center; color: #94a3b8; font-size: 14px;">Niciun telefon conectat încă.</td></tr>`;
   }
 
@@ -1724,10 +1752,24 @@ app.get('/', (req, res) => {
         .btn-action { padding:5px 9px; border-radius:7px; font-size:11px; font-weight:600; text-decoration:none; color:#fff; display:inline-flex; align-items:center; justify-content:center; border:none; cursor:pointer; }
         .btn-block { background:#dc2626; } .btn-block:hover { background:#ef4444; }
         .btn-unblock { background:#059669; } .btn-unblock:hover { background:#10b981; }
+        .btn-restore { background:#059669; } .btn-restore:hover { background:#10b981; }
         .btn-pill { background:#243246; color:#cbd5e1; border:none; padding:4px 8px; border-radius:6px; font-size:11px; font-weight:600; cursor:pointer; }
         .btn-pill:hover { background:#0284c7; color:#fff; }
         .btn-map { color:var(--acc); }
         .btn-del { color:#ef4444; }
+
+        tr.is-deleted { opacity: 0.85; background: rgba(239, 68, 68, 0.05); }
+        tr.is-deleted:hover { opacity: 1; background: rgba(239, 68, 68, 0.1); }
+        .add-dev-bar { display:flex; gap:8px; align-items:center; margin: 10px 0; flex-wrap:wrap; }
+        .btn-add-dev { background:linear-gradient(135deg,#059669,#0284c7); color:#fff; border:none; padding:7px 14px; border-radius:7px; font-size:12px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:5px; }
+        .btn-add-dev:hover { filter:brightness(1.1); }
+        .add-device-card { background:#0f1622; border:1px solid #1e293b; border-radius:8px; padding:12px; margin-bottom:12px; }
+        .add-device-grid { display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end; }
+        .form-group label { display:block; font-size:10.5px; font-weight:600; color:var(--mut); margin-bottom:3px; }
+        .form-input { background:#162030; border:1px solid #2a384c; color:#f3f6fb; padding:6px 9px; border-radius:6px; font-size:12px; outline:none; }
+        .form-input:focus { border-color:var(--acc); }
+        .btn-save-dev { background:#0284c7; color:#fff; border:none; padding:6px 12px; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer; }
+        .btn-cancel-dev { background:#334155; color:#cbd5e1; border:none; padding:6px 10px; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer; margin-left:4px; }
 
         @keyframes pulseHighlight {
           0% { background:rgba(234,179,8,.45); box-shadow:inset 0 0 0 3px #facc15; }
@@ -1840,11 +1882,42 @@ app.get('/', (req, res) => {
               <input type="text" id="searchInput" onkeyup="applyFilter()" placeholder="Caută ID sau model...">
             </div>
           </div>
+
+          <div class="add-dev-bar">
+            <button type="button" class="btn-add-dev" onclick="toggleAddDeviceForm()">➕ Adaugă telefon manual</button>
+          </div>
+          <div id="addDeviceForm" class="add-device-card" style="display:none;">
+            <div style="font-weight:700; color:#fff; margin-bottom:8px; font-size:12.5px;">➕ Adaugă Telefon Nou sau Restaurează Telefon Șters</div>
+            <div class="add-device-grid">
+              <div class="form-group" style="flex: 1; min-width: 180px;">
+                <label>Device ID (obligatoriu):</label>
+                <input type="text" id="newDevId" placeholder="ex: d88c73db12bf82aa" class="form-input" style="width:100%;">
+              </div>
+              <div class="form-group" style="flex: 1; min-width: 140px;">
+                <label>Model / Notă (opțional):</label>
+                <input type="text" id="newDevInfo" placeholder="ex: Xiaomi / Nume șofer" class="form-input" style="width:100%;">
+              </div>
+              <div class="form-group">
+                <label>Radar (+zile):</label>
+                <input type="number" id="newDevRadar" placeholder="0" min="0" class="form-input" style="width:75px;">
+              </div>
+              <div class="form-group">
+                <label>Отмена (+zile):</label>
+                <input type="number" id="newDevCancel" placeholder="0" min="0" class="form-input" style="width:75px;">
+              </div>
+              <div>
+                <button type="button" class="btn-save-dev" onclick="submitAddDevice()">Salvează & Adaugă</button>
+                <button type="button" class="btn-cancel-dev" onclick="toggleAddDeviceForm(false)">Anulează</button>
+              </div>
+            </div>
+            <small class="text-muted" style="display:block; margin-top:6px;">💡 Dacă introduci un ID care a fost șters anterior, acesta va fi restaurat automat cu tot istoricul.</small>
+          </div>
+
           <div class="filters">
             <button type="button" class="btn-filter active" id="filter-all" onclick="setDeviceFilter('all')">Toate (${devicesList.length})</button>
             <button type="button" class="btn-filter" id="filter-active" onclick="setDeviceFilter('active')">🟢 Active (${activeRecentCount})</button>
             <button type="button" class="btn-filter" id="filter-inactive" onclick="setDeviceFilter('inactive')">⚪ Inactive (${inactive24hCount})</button>
-            <button type="button" class="btn-filter" id="filter-hidden" onclick="setDeviceFilter('hidden')">🗑️ Dezinstalate (${hiddenCount})</button>
+            <button type="button" class="btn-filter" id="filter-deleted" onclick="setDeviceFilter('deleted')">🗑️ Șterse (${deletedList.length})</button>
           </div>
 
           <div class="table-responsive">
@@ -2045,20 +2118,20 @@ app.get('/', (req, res) => {
           const now = Date.now();
 
           rows.forEach(row => {
-            const isHidden = row.getAttribute('data-hidden') === 'true';
+            const isDel = row.getAttribute('data-deleted') === 'true';
             const lastSeen = parseInt(row.getAttribute('data-lastseen') || '0', 10);
             const diffHours = (now - lastSeen) / (1000 * 3600);
             const text = (row.innerText || '').toLowerCase();
 
             let matchesFilter = true;
             if (currentFilter === 'active') {
-              matchesFilter = !isHidden && (diffHours <= 48 || text.includes('zile') || text.includes('online'));
+              matchesFilter = !isDel && (diffHours <= 48 || text.includes('zile') || text.includes('online'));
             } else if (currentFilter === 'inactive') {
-              matchesFilter = !isHidden && (diffHours > 24 || text.includes('expirat') || text.includes('inactiv'));
-            } else if (currentFilter === 'hidden') {
-              matchesFilter = isHidden;
+              matchesFilter = !isDel && (diffHours > 24 || text.includes('expirat') || text.includes('inactiv'));
+            } else if (currentFilter === 'deleted') {
+              matchesFilter = isDel;
             } else if (currentFilter === 'all') {
-              matchesFilter = !isHidden;
+              matchesFilter = !isDel;
             }
 
             if (matchesFilter && search) {
@@ -2433,11 +2506,74 @@ app.get('/', (req, res) => {
         }
 
         async function deleteDeviceLive(id) {
-          if (!confirm('Ești sigur că vrei să ștergi definitiv dispozitivul ' + id + '? Va fi eliminat complet din sistem.')) {
+          if (!confirm('Ești sigur că vrei să ștergi dispozitivul ' + id + '? Va fi mutat în secțiunea Șterse.')) {
             return;
           }
           try {
             const res = await fetch('/api/admin/delete-device', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Admin-Token': window.ADMIN_TOKEN || ''
+              },
+              credentials: 'same-origin',
+              body: JSON.stringify({ id })
+            });
+
+            if (res.status === 401) {
+              window.location.href = '/';
+              return;
+            }
+
+            const data = await res.json();
+            if (data.ok) {
+              showToast('Dispozitiv mutat în secțiunea Șterse!');
+              setTimeout(() => window.location.reload(), 500);
+            } else {
+              showToast(data.error || 'Eroare la ștergere!', true);
+            }
+          } catch (e) {
+            console.error(e);
+            showToast('Eroare conexiune server!', true);
+          }
+        }
+
+        async function restoreDeviceLive(id) {
+          try {
+            const res = await fetch('/api/admin/restore-device', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Admin-Token': window.ADMIN_TOKEN || ''
+              },
+              credentials: 'same-origin',
+              body: JSON.stringify({ id })
+            });
+
+            if (res.status === 401) {
+              window.location.href = '/';
+              return;
+            }
+
+            const data = await res.json();
+            if (data.ok) {
+              showToast('Dispozitiv restaurat cu succes!');
+              setTimeout(() => window.location.reload(), 500);
+            } else {
+              showToast(data.error || 'Eroare la restaurare!', true);
+            }
+          } catch (e) {
+            console.error(e);
+            showToast('Eroare conexiune server!', true);
+          }
+        }
+
+        async function permanentDeleteDeviceLive(id) {
+          if (!confirm('ATENȚIE! Ești sigur că vrei să ștergi DEFINITIV dispozitivul ' + id + '? Datele vor fi eliminate complet din baza de date și nu mai pot fi recuperate.')) {
+            return;
+          }
+          try {
+            const res = await fetch('/api/admin/permanent-delete-device', {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
@@ -2461,14 +2597,77 @@ app.get('/', (req, res) => {
                 row.style.transform = 'scale(0.95)';
                 setTimeout(() => row.remove(), 300);
               }
-              if (markersMap[id] && mapInstance) {
-                mapInstance.removeLayer(markersMap[id]);
-                delete markersMap[id];
-              }
-              showToast('Dispozitiv ' + id + ' șters definitiv!');
-              if (typeof updateLiveMap === 'function') updateLiveMap();
+              showToast('Dispozitiv eliminat definitiv!');
             } else {
-              showToast(data.error || 'Eroare la ștergere!', true);
+              showToast(data.error || 'Eroare la ștergerea definitivă!', true);
+            }
+          } catch (e) {
+            console.error(e);
+            showToast('Eroare conexiune server!', true);
+          }
+        }
+
+        function toggleAddDeviceForm(show) {
+          const form = document.getElementById('addDeviceForm');
+          if (!form) return;
+          if (show === undefined) {
+            form.style.display = form.style.display === 'none' ? 'block' : 'none';
+          } else {
+            form.style.display = show ? 'block' : 'none';
+          }
+          if (form.style.display !== 'none') {
+            const inp = document.getElementById('newDevId');
+            if (inp) inp.focus();
+          }
+        }
+
+        async function submitAddDevice() {
+          const idInput = document.getElementById('newDevId');
+          const id = (idInput ? idInput.value : '').trim().toLowerCase();
+          if (!id) {
+            showToast('Te rugăm să introduci un Device ID!', true);
+            if (idInput) idInput.focus();
+            return;
+          }
+
+          const infoInput = document.getElementById('newDevInfo');
+          const info = (infoInput ? infoInput.value : '').trim();
+
+          const radarInput = document.getElementById('newDevRadar');
+          const radarDays = parseInt(radarInput ? radarInput.value : '0', 10) || 0;
+
+          const cancelInput = document.getElementById('newDevCancel');
+          const cancelDays = parseInt(cancelInput ? cancelInput.value : '0', 10) || 0;
+
+          try {
+            const res = await fetch('/api/admin/add-device', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Admin-Token': window.ADMIN_TOKEN || ''
+              },
+              credentials: 'same-origin',
+              body: JSON.stringify({
+                id: id,
+                info: info,
+                radar_days: radarDays,
+                cancel_days: cancelDays
+              })
+            });
+
+            if (res.status === 401) {
+              window.location.href = '/';
+              return;
+            }
+
+            const data = await res.json();
+            if (data.ok) {
+              showToast(data.alreadyExists ? 'Telefonul există deja în listă!' : 'Telefon adăugat / restaurat cu succes!');
+              setTimeout(() => {
+                window.location.reload();
+              }, 600);
+            } else {
+              showToast(data.error || 'Eroare la adăugare!', true);
             }
           } catch (e) {
             console.error(e);
@@ -2741,6 +2940,10 @@ app.get('/', (req, res) => {
         window.toggleHideLive = toggleHideLive;
         window.toggleUninstalledLive = toggleUninstalledLive;
         window.deleteDeviceLive = deleteDeviceLive;
+        window.restoreDeviceLive = restoreDeviceLive;
+        window.permanentDeleteDeviceLive = permanentDeleteDeviceLive;
+        window.toggleAddDeviceForm = toggleAddDeviceForm;
+        window.submitAddDevice = submitAddDevice;
         window.toggleDeviceSelection = toggleDeviceSelection;
         window.selectAllTargets = selectAllTargets;
         window.clearAnnouncement = clearAnnouncement;
@@ -2967,7 +3170,7 @@ app.post('/api/admin/set-expiration', (req, res) => {
   try {
     if (!isAuthenticated(req)) return res.status(401).json({ error: 'Neautorizat' });
     const { id, type, expires, addDays, addHours } = req.body;
-    const dev = devices[id];
+    const dev = devices[id] || (deletedDevices && deletedDevices[id]);
     if (!dev) return res.status(404).json({ error: 'Dispozitiv negăsit' });
 
     if (!(dev.radar_expires instanceof Date) || isNaN(dev.radar_expires.getTime())) {
@@ -3116,7 +3319,7 @@ app.post('/api/admin/toggle-uninstalled', (req, res) => {
   }
 });
 
-// Endpoint Live Ștergere Definitivă Dispozitiv (Remove / Delete)
+// Endpoint Live Ștergere Dispozitiv (Mută în lista de Șterse)
 app.post('/api/admin/delete-device', (req, res) => {
   try {
     if (!isAuthenticated(req)) return res.status(401).json({ error: 'unauthorized' });
@@ -3140,6 +3343,118 @@ app.post('/api/admin/delete-device', (req, res) => {
   } catch (err) {
     console.error('Eroare delete-device:', err);
     res.status(500).json({ error: 'Eroare la ștergerea dispozitivului' });
+  }
+});
+
+// Endpoint Live Restaurare Dispozitiv din Șterse în Active
+app.post('/api/admin/restore-device', (req, res) => {
+  try {
+    if (!isAuthenticated(req)) return res.status(401).json({ error: 'unauthorized' });
+    const { id } = req.body;
+    if (!id) return res.status(400).json({ error: 'ID lipsă' });
+
+    const dev = (deletedDevices && deletedDevices[id]) || devices[id];
+    if (!dev) return res.status(404).json({ error: 'Dispozitiv negăsit în lista de șterse' });
+
+    dev.deleted = false;
+    dev.uninstalled = false;
+    dev.blocked = false;
+    if (dev.deletedAt) delete dev.deletedAt;
+
+    devices[id] = dev;
+    if (deletedDevices && deletedDevices[id]) {
+      delete deletedDevices[id];
+      saveDeletedDevices();
+    }
+    saveDevices();
+    res.json({ ok: true, restored: true, id, device: dev });
+  } catch (err) {
+    console.error('Eroare restore-device:', err);
+    res.status(500).json({ error: 'Eroare la restaurare: ' + err.message });
+  }
+});
+
+// Endpoint Live Ștergere Definitivă (Purjare completă)
+app.post('/api/admin/permanent-delete-device', (req, res) => {
+  try {
+    if (!isAuthenticated(req)) return res.status(401).json({ error: 'unauthorized' });
+    const { id } = req.body;
+    if (!id) return res.status(400).json({ error: 'ID lipsă' });
+
+    if (devices[id]) {
+      delete devices[id];
+      saveDevices();
+    }
+    if (deletedDevices && deletedDevices[id]) {
+      delete deletedDevices[id];
+      saveDeletedDevices();
+    }
+    res.json({ ok: true, permanentlyDeleted: true, id });
+  } catch (err) {
+    console.error('Eroare permanent-delete-device:', err);
+    res.status(500).json({ error: 'Eroare la ștergerea definitivă: ' + err.message });
+  }
+});
+
+// Endpoint Live Adăugare / Restaurare Manuală Dispozitiv
+app.post('/api/admin/add-device', (req, res) => {
+  try {
+    if (!isAuthenticated(req)) return res.status(401).json({ error: 'unauthorized' });
+    let { id, info, radar_days, cancel_days } = req.body;
+    if (!id || typeof id !== 'string') return res.status(400).json({ error: 'ID dispozitiv invalid' });
+    id = id.trim().toLowerCase();
+    if (id.length < 4) return res.status(400).json({ error: 'ID-ul trebuie să aibă minim 4 caractere' });
+
+    const now = new Date();
+
+    // Dacă dispozitivul există deja în devices activ
+    if (devices[id] && !devices[id].deleted) {
+      return res.json({ ok: true, alreadyExists: true, id, device: devices[id] });
+    }
+
+    // Dacă a fost în deletedDevices, îl restaurăm
+    let dev = (deletedDevices && deletedDevices[id]);
+    if (dev) {
+      delete deletedDevices[id];
+      saveDeletedDevices();
+    } else {
+      dev = {
+        id: id,
+        info: (info && info.trim()) || 'Telefon adăugat manual',
+        radar_expires: now,
+        cancel_expires: now,
+        trial_used: false,
+        cancel_trial_used: false,
+        blocked: false,
+        deleted: false,
+        last_seen: now,
+        created_at: now
+      };
+    }
+
+    dev.deleted = false;
+    dev.uninstalled = false;
+    dev.blocked = false;
+    if (info && info.trim()) dev.info = info.trim();
+
+    if (radar_days && Number(radar_days) > 0) {
+      const base = (dev.radar_expires && new Date(dev.radar_expires) > now) ? new Date(dev.radar_expires) : new Date(now);
+      base.setDate(base.getDate() + Number(radar_days));
+      dev.radar_expires = base;
+    }
+    if (cancel_days && Number(cancel_days) > 0) {
+      const base = (dev.cancel_expires && new Date(dev.cancel_expires) > now) ? new Date(dev.cancel_expires) : new Date(now);
+      base.setDate(base.getDate() + Number(cancel_days));
+      dev.cancel_expires = base;
+    }
+
+    devices[id] = dev;
+    saveDevices();
+
+    res.json({ ok: true, added: true, id, device: dev });
+  } catch (err) {
+    console.error('Eroare add-device:', err);
+    res.status(500).json({ error: 'Eroare la adăugarea dispozitivului: ' + err.message });
   }
 });
 
