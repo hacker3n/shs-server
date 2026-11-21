@@ -210,8 +210,6 @@ function resolveDeviceModel(raw) {
   if (/(galaxy|redmi|poco|pixel|legion|tab|xperia|motorola|huawei|xiaomi|samsung|lenovo|oppo|vivo|oneplus|honor|realme)/i.test(m)) {
     return m;
   }
-    return m;
-  }
 
   return m.replace(/\s+[0-9A-Za-z]{6,12}$/, '').trim() || 'Dispozitiv Android';
 }
