@@ -947,7 +947,10 @@ app.get('/admin', requireAdmin, async (req, res) => {
       <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
       <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
       <style>
-        .leaflet-container { background: #020617; font-family: inherit; }
+        .leaflet-container { background: #0b0f19; font-family: inherit; }
+        .leaflet-tile-pane {
+          filter: brightness(0.6) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3);
+        }
         .leaflet-marker-icon, .custom-leaflet-icon, .leaflet-div-icon {
           background: transparent !important;
           border: none !important;
@@ -1105,10 +1108,9 @@ app.get('/admin', requireAdmin, async (req, res) => {
       <script>
         const map = L.map('map').setView([47.0245, 28.8322], 12);
         
-        // CartoDB Dark Tiles cu fallback automat la OpenStreetMap
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-          attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
-          subdomains: 'abcd',
+        // OpenStreetMap Dark Filter Tiles (Fără API Key, Fără Watermark)
+        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          attribution: '&copy; OpenStreetMap contributors',
           maxZoom: 19
         }).addTo(map);
 
