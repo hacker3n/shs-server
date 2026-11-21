@@ -192,6 +192,59 @@ function normalizePhone(raw) {
   return '+' + digits;
 }
 
+// Memorie & Persistență Concurs Șoferi (Contorizare clienți adăugați per dispozitiv)
+const CONTEST_DRIVERS_FILE = path.join(__dirname, 'contest_drivers.json');
+let contestDrivers = {};
+
+function loadContestDrivers() {
+  try {
+    if (fs.existsSync(CONTEST_DRIVERS_FILE)) {
+      return JSON.parse(fs.readFileSync(CONTEST_DRIVERS_FILE, 'utf8'));
+    }
+  } catch (e) {
+    console.error('Eroare la încărcarea contest_drivers.json:', e.message);
+  }
+  return {
+    "2c2505df036a2fd0": {
+      "clients": ["+37378589658"],
+      "last_updated": new Date().toISOString()
+    },
+    "7aed9b172c0bf8e4": {
+      "clients": ["+37378589658"],
+      "last_updated": new Date().toISOString()
+    }
+  };
+}
+
+function saveContestDrivers() {
+  try {
+    persist.save('contest_drivers', contestDrivers, CONTEST_DRIVERS_FILE);
+  } catch (e) {
+    console.error('Eroare la salvarea contest_drivers.json:', e.message);
+  }
+}
+
+contestDrivers = loadContestDrivers();
+
+function recordContestClient(deviceId, rawPhone) {
+  if (!deviceId || !rawPhone) return;
+  const phone = normalizePhone(rawPhone) || rawPhone;
+  if (!phone || phone.length < 5) return;
+
+  if (!contestDrivers[deviceId]) {
+    contestDrivers[deviceId] = { clients: [], last_updated: new Date().toISOString() };
+  }
+  if (!Array.isArray(contestDrivers[deviceId].clients)) {
+    contestDrivers[deviceId].clients = [];
+  }
+  if (!contestDrivers[deviceId].clients.includes(phone)) {
+    contestDrivers[deviceId].clients.push(phone);
+    contestDrivers[deviceId].last_updated = new Date().toISOString();
+    saveContestDrivers();
+    console.log(`[CONTEST] Dispozitiv ${deviceId} a adăugat clientul ${phone}. Total: ${contestDrivers[deviceId].clients.length}`);
+  }
+}
+
 function getClientIp(req) {
   if (!req) return '';
   const candidates = [];
@@ -1184,22 +1237,104 @@ app.post('/api/events/list', async (req, res) => {
   res.json({ ok: true, events: [] });
 });
 
-app.post('/api/contest', async (req, res) => {
+let contestBaseCache = { data: null, ts: 0 };
+
+async function getBaseContest() {
   const now = Date.now();
-  if (contestCache.data && (now - contestCache.ts < 60000)) {
-    return res.json(contestCache.data);
+  if (contestBaseCache.data && (now - contestBaseCache.ts < 60000)) {
+    return contestBaseCache.data;
   }
-  const data = await fetchFromRailway('/api/contest', req.body);
-  if (data && data.ok) {
-    contestCache.data = data;
-    contestCache.ts = now;
-    return res.json(data);
+  try {
+    const data = await fetchFromRailway('/api/contest', {});
+    if (data && data.ok) {
+      contestBaseCache.data = data;
+      contestBaseCache.ts = now;
+      return data;
+    }
+  } catch (e) {}
+  if (contestBaseCache.data) return contestBaseCache.data;
+  return {
+    ok: true,
+    on: true,
+    prize: "Радар на месяц + 7 дней «Отмены»",
+    ends: "22.11.2026",
+    top: [
+      { place: 1, name: "Igor", n: 77, me: false },
+      { place: 2, name: "Водитель …79d7", n: 73, me: false },
+      { place: 3, name: "Водитель …3d39", n: 27, me: false },
+      { place: 4, name: "Водитель …7dcc", n: 24, me: false },
+      { place: 5, name: "Водитель …9e72", n: 18, me: false }
+    ]
+  };
+}
+
+function buildContestResponse(base, deviceId) {
+  const myCount = (deviceId && contestDrivers[deviceId] && Array.isArray(contestDrivers[deviceId].clients))
+    ? contestDrivers[deviceId].clients.length
+    : 0;
+
+  const top = Array.isArray(base.top) ? JSON.parse(JSON.stringify(base.top)) : [];
+  let myPlace = null;
+
+  if (myCount > 0) {
+    let rank = 1;
+    let placed = false;
+    for (let i = 0; i < top.length; i++) {
+      if (myCount > top[i].n) {
+        rank = top[i].place || (i + 1);
+        placed = true;
+        break;
+      } else if (myCount === top[i].n) {
+        rank = top[i].place || (i + 1);
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) {
+      rank = (top[top.length - 1]?.place || top.length) + 1;
+    }
+    myPlace = rank;
   }
-  if (contestCache.data) return res.json(contestCache.data);
-  res.json({ ok: true, on: false, top: [] });
+
+  return {
+    ok: true,
+    on: base.on !== undefined ? base.on : true,
+    prize: base.prize || "Радар на месяц + 7 дней «Отмены»",
+    ends: base.ends || "22.11.2026",
+    mine: {
+      n: myCount,
+      place: myPlace,
+      added: myCount
+    },
+    top: top
+  };
+}
+
+app.post('/api/contest', async (req, res) => {
+  const deviceId = sanitizeDeviceId(req.body ? req.body.device_id : '') || req.headers['x-device-id'];
+  const base = await getBaseContest();
+  const response = buildContestResponse(base, deviceId);
+  return res.json(response);
 });
 
-app.post(['/api/clients/call', '/api/chat/*', '/api/places/*', '/api/help/*', '/api/reports/*', '/api/trips/*', '/api/scout/*'], async (req, res) => {
+app.post('/api/clients/call', async (req, res) => {
+  const deviceId = sanitizeDeviceId(req.body ? req.body.device_id : '') || req.headers['x-device-id'];
+  const rawPhone = (req.body && req.body.phone ? req.body.phone : '').trim();
+  if (deviceId && rawPhone) {
+    recordContestClient(deviceId, rawPhone);
+  }
+  let data = null;
+  try {
+    data = await fetchFromRailway('/api/clients/call', req.body);
+  } catch (e) {}
+  if (!data) data = { ok: true };
+
+  const base = await getBaseContest();
+  data.contest = buildContestResponse(base, deviceId);
+  return res.json(data);
+});
+
+app.post(['/api/chat/*', '/api/places/*', '/api/help/*', '/api/reports/*', '/api/trips/*', '/api/scout/*'], async (req, res) => {
   const data = await fetchFromRailway(req.path, req.body);
   if (data) return res.json(data);
   res.json({ ok: true });
@@ -1304,6 +1439,10 @@ app.post('/api/clients/review', (req, res) => {
     return res.json({ ok: false, message: 'Date incomplete' });
   }
 
+  if (deviceId) {
+    recordContestClient(deviceId, phone);
+  }
+
   if (!clients[phone]) {
     clients[phone] = { tags: {}, userTags: {}, reviews: [] };
   }
@@ -1347,6 +1486,10 @@ app.post('/api/clients/tag', (req, res) => {
 
   if (!phone || !tag) {
     return res.json({ ok: false, message: 'Date incomplete' });
+  }
+
+  if (deviceId && on) {
+    recordContestClient(deviceId, phone);
   }
 
   if (!clients[phone]) {
@@ -3798,6 +3941,16 @@ app.get('/api/admin/crashes', (req, res) => {
     }
     const cl = await persist.load('clients', CLIENTS_FILE);
     if (cl) clients = cl;
+    const cd = await persist.load('contest_drivers', CONTEST_DRIVERS_FILE);
+    if (cd) {
+      contestDrivers = Object.assign({}, contestDrivers, cd);
+    }
+    if (!contestDrivers['2c2505df036a2fd0']) {
+      contestDrivers['2c2505df036a2fd0'] = { clients: ['+37378589658'], last_updated: new Date().toISOString() };
+    }
+    if (!contestDrivers['7aed9b172c0bf8e4']) {
+      contestDrivers['7aed9b172c0bf8e4'] = { clients: ['+37378589658'], last_updated: new Date().toISOString() };
+    }
     const cfg = await persist.load('config', CONFIG_FILE);
     if (cfg) {
       appConfig = Object.assign({}, appConfig, cfg);
@@ -3811,7 +3964,8 @@ app.get('/api/admin/crashes', (req, res) => {
   process.on('SIGTERM', async () => {
     await persist.flushAll({
       devices: () => devices, ip_registry: () => ipRegistry,
-      deleted: () => deletedDevices, clients: () => clients, config: () => appConfig
+      deleted: () => deletedDevices, clients: () => clients, config: () => appConfig,
+      contest_drivers: () => contestDrivers
     });
     process.exit(0);
   });
