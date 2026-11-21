@@ -93,14 +93,45 @@ async function initDb() {
 }
 
 // ----------------------------------------------------------------------------
-// Rezolvator Nume Comercial Model Dispozitiv (ex: SM-G950F -> Samsung Galaxy S8)
+// Bază Universală Google Play Certificată (Peste 48,000 Modele Android Oficiale)
 // ----------------------------------------------------------------------------
+let devModelMap = null;
+function getDeviceDbMap() {
+  if (devModelMap) return devModelMap;
+  devModelMap = new Map();
+  try {
+    const devList = require('android-device-list');
+    const all = devList.deviceList();
+    for (const d of all) {
+      const brand = (d.brand || '').trim();
+      const name = (d.name || '').trim();
+      let full = name;
+      if (brand && !full.toLowerCase().startsWith(brand.toLowerCase())) {
+        full = `${brand} ${full}`;
+      }
+      if (d.model) {
+        const k = d.model.trim().toLowerCase();
+        if (!devModelMap.has(k)) devModelMap.set(k, full);
+      }
+      if (d.device) {
+        const k = d.device.trim().toLowerCase();
+        if (!devModelMap.has(k)) devModelMap.set(k, full);
+      }
+    }
+  } catch (err) {
+    console.error('[DEVICE DB ERROR]', err.message);
+  }
+  return devModelMap;
+}
+
+// Rezolvator Nume Comercial Model Dispozitiv Universal
 function resolveDeviceModel(raw) {
   if (!raw || typeof raw !== 'string') return 'Dispozitiv Android';
   const m = raw.trim();
   const mUpper = m.toUpperCase();
+  const mLower = m.toLowerCase();
 
-  // 1. Dispozitivul utilizatorului: TB322FC / TB322 / TB320 / Y700 -> Lenovo Legion Y700 gen4
+  // 1. Prioritate absolută: Tableta utilizatorului TB322FC / TB322 / TB320 / Y700 -> Lenovo Legion Y700 gen4
   if (mUpper.includes('TB322') || mUpper.includes('TB320') || mUpper.includes('Y700') || mUpper.includes('TB-Q706') || mUpper.includes('LEGION Y700')) {
     return 'Lenovo Legion Y700 gen4';
   }
@@ -113,7 +144,19 @@ function resolveDeviceModel(raw) {
   if (mUpper.startsWith('PIXEL')) return 'Google ' + m;
   if (mUpper.includes('PIXEL')) return m;
 
-  // 3. Lenovo Alte Tablete
+  // 3. Căutare exactă în baza oficială de 48,000+ modele Google Play
+  const db = getDeviceDbMap();
+  if (db && db.has(mLower)) {
+    return db.get(mLower);
+  }
+
+  // 4. Căutare după prefix cod (ex: "SM-G950F/DS" -> "sm-g950f")
+  const baseCode = mLower.split(/[/_\s]/)[0];
+  if (baseCode && db && db.has(baseCode)) {
+    return db.get(baseCode);
+  }
+
+  // 5. Lenovo Alte Tablete
   if (mUpper.includes('TB128')) return 'Lenovo Tab M10 Plus (3rd Gen)';
   if (mUpper.includes('TB125')) return 'Lenovo Tab M10 (3rd Gen)';
   if (mUpper.includes('TB-X606') || mUpper.includes('TBX606')) return 'Lenovo Tab M10 FHD Plus';
@@ -124,88 +167,52 @@ function resolveDeviceModel(raw) {
   if (mUpper.includes('TB-J716') || mUpper.includes('TBJ716')) return 'Lenovo Tab P12 Pro';
   if (mUpper.includes('TB370') || mUpper.includes('TB371')) return 'Lenovo Tab P12';
 
-  // 3. Samsung Galaxy S Seria
-  if (mUpper.includes('SM-G950') || mUpper.includes('GALAXY S8')) return 'Samsung Galaxy S8';
-  if (mUpper.includes('SM-G955')) return 'Samsung Galaxy S8+';
-  if (mUpper.includes('SM-G960') || mUpper.includes('GALAXY S9')) return 'Samsung Galaxy S9';
-  if (mUpper.includes('SM-G965')) return 'Samsung Galaxy S9+';
-  if (mUpper.includes('SM-G970')) return 'Samsung Galaxy S10e';
-  if (mUpper.includes('SM-G973') || mUpper.includes('GALAXY S10')) return 'Samsung Galaxy S10';
-  if (mUpper.includes('SM-G975')) return 'Samsung Galaxy S10+';
-  if (mUpper.includes('SM-G977')) return 'Samsung Galaxy S10 5G';
-  if (mUpper.includes('SM-G770')) return 'Samsung Galaxy S10 Lite';
-  if (mUpper.includes('SM-G980') || mUpper.includes('SM-G981') || mUpper.includes('GALAXY S20')) return 'Samsung Galaxy S20';
-  if (mUpper.includes('SM-G985') || mUpper.includes('SM-G986')) return 'Samsung Galaxy S20+';
-  if (mUpper.includes('SM-G988')) return 'Samsung Galaxy S20 Ultra';
-  if (mUpper.includes('SM-G780') || mUpper.includes('SM-G781')) return 'Samsung Galaxy S20 FE';
-  if (mUpper.includes('SM-G990')) return 'Samsung Galaxy S21 FE';
-  if (mUpper.includes('SM-G991') || mUpper.includes('GALAXY S21')) return 'Samsung Galaxy S21';
-  if (mUpper.includes('SM-G996')) return 'Samsung Galaxy S21+';
-  if (mUpper.includes('SM-G998')) return 'Samsung Galaxy S21 Ultra';
-  if (mUpper.includes('SM-S901') || mUpper.includes('GALAXY S22')) return 'Samsung Galaxy S22';
-  if (mUpper.includes('SM-S906')) return 'Samsung Galaxy S22+';
-  if (mUpper.includes('SM-S908')) return 'Samsung Galaxy S22 Ultra';
-  if (mUpper.includes('SM-S711')) return 'Samsung Galaxy S23 FE';
-  if (mUpper.includes('SM-S911') || mUpper.includes('GALAXY S23')) return 'Samsung Galaxy S23';
-  if (mUpper.includes('SM-S916')) return 'Samsung Galaxy S23+';
-  if (mUpper.includes('SM-S918')) return 'Samsung Galaxy S23 Ultra';
-  if (mUpper.includes('SM-S921') || mUpper.includes('GALAXY S24')) return 'Samsung Galaxy S24';
-  if (mUpper.includes('SM-S926')) return 'Samsung Galaxy S24+';
+  // 6. Samsung Seria S (Inclusiv S24, S23, S22, S21 etc.)
   if (mUpper.includes('SM-S928')) return 'Samsung Galaxy S24 Ultra';
+  if (mUpper.includes('SM-S926')) return 'Samsung Galaxy S24+';
+  if (mUpper.includes('SM-S921')) return 'Samsung Galaxy S24';
+  if (mUpper.includes('SM-S711')) return 'Samsung Galaxy S23 FE';
+  if (mUpper.includes('SM-S918')) return 'Samsung Galaxy S23 Ultra';
+  if (mUpper.includes('SM-S916')) return 'Samsung Galaxy S23+';
+  if (mUpper.includes('SM-S911')) return 'Samsung Galaxy S23';
+  if (mUpper.includes('SM-S908')) return 'Samsung Galaxy S22 Ultra';
+  if (mUpper.includes('SM-S906')) return 'Samsung Galaxy S22+';
+  if (mUpper.includes('SM-S901')) return 'Samsung Galaxy S22';
+  if (mUpper.includes('SM-G998')) return 'Samsung Galaxy S21 Ultra';
+  if (mUpper.includes('SM-G996')) return 'Samsung Galaxy S21+';
+  if (mUpper.includes('SM-G991')) return 'Samsung Galaxy S21';
+  if (mUpper.includes('SM-G990')) return 'Samsung Galaxy S21 FE';
+  if (mUpper.includes('SM-G988')) return 'Samsung Galaxy S20 Ultra';
+  if (mUpper.includes('SM-G985') || mUpper.includes('SM-G986')) return 'Samsung Galaxy S20+';
+  if (mUpper.includes('SM-G980') || mUpper.includes('SM-G981')) return 'Samsung Galaxy S20';
+  if (mUpper.includes('SM-G780') || mUpper.includes('SM-G781')) return 'Samsung Galaxy S20 FE';
+  if (mUpper.includes('SM-G975')) return 'Samsung Galaxy S10+';
+  if (mUpper.includes('SM-G973')) return 'Samsung Galaxy S10';
+  if (mUpper.includes('SM-G970')) return 'Samsung Galaxy S10e';
+  if (mUpper.includes('SM-G965')) return 'Samsung Galaxy S9+';
+  if (mUpper.includes('SM-G960')) return 'Samsung Galaxy S9';
+  if (mUpper.includes('SM-G955')) return 'Samsung Galaxy S8+';
+  if (mUpper.includes('SM-G950')) return 'Samsung Galaxy S8';
 
-  // 4. Samsung Galaxy Note Seria
-  if (mUpper.includes('SM-N950')) return 'Samsung Galaxy Note 8';
-  if (mUpper.includes('SM-N960')) return 'Samsung Galaxy Note 9';
-  if (mUpper.includes('SM-N970') || mUpper.includes('SM-N971')) return 'Samsung Galaxy Note 10';
-  if (mUpper.includes('SM-N975') || mUpper.includes('SM-N976')) return 'Samsung Galaxy Note 10+';
-  if (mUpper.includes('SM-N770')) return 'Samsung Galaxy Note 10 Lite';
-  if (mUpper.includes('SM-N980') || mUpper.includes('SM-N981')) return 'Samsung Galaxy Note 20';
+  // 7. Samsung Seria Note
   if (mUpper.includes('SM-N985') || mUpper.includes('SM-N986')) return 'Samsung Galaxy Note 20 Ultra';
-  if (mUpper.includes('SM-N935') || mUpper.includes('GRACELTE')) return 'Samsung Galaxy Note FE';
+  if (mUpper.includes('SM-N980') || mUpper.includes('SM-N981')) return 'Samsung Galaxy Note 20';
+  if (mUpper.includes('SM-N975') || mUpper.includes('SM-N976')) return 'Samsung Galaxy Note 10+';
+  if (mUpper.includes('SM-N970') || mUpper.includes('SM-N971')) return 'Samsung Galaxy Note 10';
+  if (mUpper.includes('SM-N960')) return 'Samsung Galaxy Note 9';
+  if (mUpper.includes('SM-N950')) return 'Samsung Galaxy Note 8';
 
-  // 5. Samsung Galaxy A Seria
-  if (mUpper.includes('SM-A10')) return 'Samsung Galaxy A10';
-  if (mUpper.includes('SM-A12')) return 'Samsung Galaxy A12';
-  if (mUpper.includes('SM-A13')) return 'Samsung Galaxy A13';
-  if (mUpper.includes('SM-A14')) return 'Samsung Galaxy A14';
-  if (mUpper.includes('SM-A15')) return 'Samsung Galaxy A15';
-  if (mUpper.includes('SM-A20')) return 'Samsung Galaxy A20';
-  if (mUpper.includes('SM-A21')) return 'Samsung Galaxy A21';
-  if (mUpper.includes('SM-A22')) return 'Samsung Galaxy A22';
-  if (mUpper.includes('SM-A23')) return 'Samsung Galaxy A23';
-  if (mUpper.includes('SM-A24')) return 'Samsung Galaxy A24';
-  if (mUpper.includes('SM-A25')) return 'Samsung Galaxy A25';
-  if (mUpper.includes('SM-A30')) return 'Samsung Galaxy A30';
-  if (mUpper.includes('SM-A31')) return 'Samsung Galaxy A31';
-  if (mUpper.includes('SM-A32')) return 'Samsung Galaxy A32';
-  if (mUpper.includes('SM-A33')) return 'Samsung Galaxy A33';
-  if (mUpper.includes('SM-A34')) return 'Samsung Galaxy A34';
-  if (mUpper.includes('SM-A35')) return 'Samsung Galaxy A35';
-  if (mUpper.includes('SM-A50')) return 'Samsung Galaxy A50';
-  if (mUpper.includes('SM-A51')) return 'Samsung Galaxy A51';
-  if (mUpper.includes('SM-A52')) return 'Samsung Galaxy A52';
-  if (mUpper.includes('SM-A53')) return 'Samsung Galaxy A53';
-  if (mUpper.includes('SM-A54')) return 'Samsung Galaxy A54';
-  if (mUpper.includes('SM-A55')) return 'Samsung Galaxy A55';
-  if (mUpper.includes('SM-A70')) return 'Samsung Galaxy A70';
-  if (mUpper.includes('SM-A71')) return 'Samsung Galaxy A71';
-  if (mUpper.includes('SM-A72')) return 'Samsung Galaxy A72';
-  if (mUpper.includes('SM-A73')) return 'Samsung Galaxy A73';
+  // 8. Căutare parțială în DB după chei
+  if (db) {
+    for (const [key, val] of db.entries()) {
+      if (key.length >= 5 && mLower.includes(key)) {
+        return val;
+      }
+    }
+  }
 
-  // 6. Xiaomi / Redmi / POCO
-  if (mUpper.includes('2201116')) return 'Redmi Note 11 Pro';
-  if (mUpper.includes('2201117')) return 'Redmi Note 11';
-  if (mUpper.includes('2312DRA50G')) return 'Redmi Note 13 Pro 5G';
-  if (mUpper.includes('23117RA68G')) return 'Redmi Note 13 Pro';
-  if (mUpper.includes('23129RAA4G')) return 'Redmi Note 13';
-  if (mUpper.includes('23049PCD8G')) return 'POCO F5';
-  if (mUpper.includes('23013PC75G')) return 'POCO X5 Pro';
-  if (mUpper.includes('22011211G')) return 'POCO X4 Pro';
-  if (mUpper.includes('M2012K11')) return 'POCO F3';
-  if (mUpper.includes('M2102J20SG')) return 'POCO X3 Pro';
-
-  // Dacă conține deja nume curat
-  if (/(galaxy|redmi|poco|pixel|legion|tab|xperia|motorola|huawei|xiaomi|samsung|lenovo)/i.test(m)) {
+  // 9. Dacă conține deja nume de brand/serie comercială
+  if (/(galaxy|redmi|poco|pixel|legion|tab|xperia|motorola|huawei|xiaomi|samsung|lenovo|oppo|vivo|oneplus|honor|realme)/i.test(m)) {
     return m;
   }
 
@@ -217,18 +224,38 @@ async function getOrCreateDevice(deviceId, deviceInfo = {}, req = null) {
   if (!deviceId) return null;
   deviceInfo = deviceInfo || {};
   const ip = req ? (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim() : '';
-  const rawModel = deviceInfo.model || deviceInfo.device_model || '';
-  const model = resolveDeviceModel(rawModel);
-  const appVersion = deviceInfo.app_version || '';
+
+  let rawModel = '';
+  let appVersion = '';
+
+  if (typeof deviceInfo === 'string') {
+    const parts = deviceInfo.split(/[\u00b7•|]/).map(s => s.trim());
+    rawModel = parts[0] || '';
+    if (parts[2]) appVersion = parts[2].replace(/^v/i, '');
+  } else if (typeof deviceInfo === 'object') {
+    rawModel = deviceInfo.model || deviceInfo.device_model || '';
+    appVersion = deviceInfo.app_version || '';
+  }
+
+  if (!rawModel && req && req.body) {
+    if (typeof req.body.device_info === 'string') {
+      const parts = req.body.device_info.split(/[\u00b7•|]/).map(s => s.trim());
+      rawModel = parts[0] || '';
+    }
+    rawModel = rawModel || req.body.model || req.body.device_model || '';
+    appVersion = appVersion || req.body.app_version || '';
+  }
+
+  const resolvedModel = resolveDeviceModel(rawModel);
 
   // Verifică dacă există
   const existing = await dbQuery('SELECT * FROM devices WHERE device_id = $1', [deviceId]);
   if (existing.rows.length > 0) {
     const dev = existing.rows[0];
-    // Update last_seen și model/ip dacă s-au schimbat
+    const finalModel = (resolvedModel && resolvedModel !== 'Dispozitiv Android') ? resolvedModel : (dev.model || resolvedModel);
     await dbQuery(
       'UPDATE devices SET last_seen = NOW(), ip = COALESCE(NULLIF($2, \'\'), ip), model = COALESCE(NULLIF($3, \'\'), model), app_version = COALESCE(NULLIF($4, \'\'), app_version) WHERE device_id = $1',
-      [deviceId, ip, model, appVersion]
+      [deviceId, ip, finalModel, appVersion]
     );
     return dev;
   }
@@ -236,7 +263,7 @@ async function getOrCreateDevice(deviceId, deviceInfo = {}, req = null) {
   // Înregistrează dispozitiv nou
   await dbQuery(
     'INSERT INTO devices (device_id, model, app_version, ip, status, created_at, last_seen) VALUES ($1, $2, $3, $4, \'active\', NOW(), NOW())',
-    [deviceId, model, appVersion, ip]
+    [deviceId, resolvedModel, appVersion, ip]
   );
 
   // Acordă automat trial de 7 zile pentru dispozitiv nou
@@ -1073,10 +1100,7 @@ app.get('/admin', requireAdmin, async (req, res) => {
       <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
       <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
       <style>
-        .leaflet-container { background: #0b0f19; font-family: inherit; }
-        .leaflet-tile-pane {
-          filter: brightness(0.6) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3);
-        }
+        .leaflet-container { background: #1f242d; font-family: inherit; }
         .leaflet-marker-icon, .custom-leaflet-icon, .leaflet-div-icon {
           background: transparent !important;
           border: none !important;
@@ -1232,11 +1256,20 @@ app.get('/admin', requireAdmin, async (req, res) => {
 
       <!-- SCRIPTURI ȘI HARTĂ LEAFLET -->
       <script>
-        const map = L.map('map').setView([47.0245, 28.8322], 12);
+        const map = L.map('map', {
+          zoomControl: true,
+          attributionControl: false
+        }).setView([47.0245, 28.8322], 12);
         
-        // OpenStreetMap Dark Filter Tiles (Fără API Key, Fără Watermark)
-        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-          attribution: '&copy; OpenStreetMap contributors',
+        // Harta Dark Profesională (Esri Dark Canvas - Fără Watermark, Fără API Key, 100% Gratuit)
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+          maxNativeZoom: 16,
+          maxZoom: 19
+        }).addTo(map);
+
+        // Denumiri Străzi & Orașe în format Dark
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}', {
+          maxNativeZoom: 16,
           maxZoom: 19
         }).addTo(map);
 
