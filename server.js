@@ -48,9 +48,52 @@ async function dbQuery(text, params) {
   }
 }
 
+async function initDb() {
+  try {
+    await dbQuery(`
+      CREATE TABLE IF NOT EXISTS devices (
+        device_id VARCHAR(100) PRIMARY KEY,
+        model VARCHAR(100),
+        app_version VARCHAR(50),
+        ip VARCHAR(50),
+        status VARCHAR(20) DEFAULT 'active',
+        created_at TIMESTAMP DEFAULT NOW(),
+        last_seen TIMESTAMP DEFAULT NOW(),
+        lat DOUBLE PRECISION,
+        lng DOUBLE PRECISION,
+        speed DOUBLE PRECISION,
+        location_updated_at TIMESTAMP,
+        radar_active BOOLEAN DEFAULT false,
+        cancel_active BOOLEAN DEFAULT false
+      );
+      CREATE TABLE IF NOT EXISTS subscriptions (
+        device_id VARCHAR(100) PRIMARY KEY,
+        valid_until TIMESTAMP,
+        radar_valid_until TIMESTAMP,
+        cancel_valid_until TIMESTAMP,
+        is_trial BOOLEAN DEFAULT FALSE,
+        plan_name VARCHAR(100),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+      ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS radar_valid_until TIMESTAMP;
+      ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS cancel_valid_until TIMESTAMP;
+      ALTER TABLE devices ADD COLUMN IF NOT EXISTS lat DOUBLE PRECISION;
+      ALTER TABLE devices ADD COLUMN IF NOT EXISTS lng DOUBLE PRECISION;
+      ALTER TABLE devices ADD COLUMN IF NOT EXISTS speed DOUBLE PRECISION;
+      ALTER TABLE devices ADD COLUMN IF NOT EXISTS location_updated_at TIMESTAMP;
+      ALTER TABLE devices ADD COLUMN IF NOT EXISTS radar_active BOOLEAN DEFAULT false;
+      ALTER TABLE devices ADD COLUMN IF NOT EXISTS cancel_active BOOLEAN DEFAULT false;
+    `);
+    console.log('[DB] Schemă inițializată cu succes');
+  } catch (err) {
+    console.error('[DB INIT ERROR]', err.message);
+  }
+}
+
 // Obține sau creează dispozitiv
 async function getOrCreateDevice(deviceId, deviceInfo = {}, req = null) {
   if (!deviceId) return null;
+  deviceInfo = deviceInfo || {};
   const ip = req ? (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim() : '';
   const model = deviceInfo.model || deviceInfo.device_model || '';
   const appVersion = deviceInfo.app_version || '';
@@ -606,36 +649,6 @@ app.get('/api/admin/devices-locations', requireAdmin, async (req, res) => {
     res.status(500).json({ ok: false, error: err.message });
   }
 });
-
-// Funcție Ajutătoare: Calcul Timp Rămas Format Prietenos
-function formatRemaining(targetDate, now) {
-  if (!targetDate) return { text: 'EXPIRAT', active: false, class: 'bg-rose-500/10 text-rose-400 border-rose-500/20' };
-  const d = new Date(targetDate);
-  const diffMs = d.getTime() - now.getTime();
-  if (diffMs <= 0) return { text: 'EXPIRAT', active: false, class: 'bg-rose-500/10 text-rose-400 border-rose-500/20' };
-
-  const totalMin = Math.floor(diffMs / 60000);
-  const days = Math.floor(totalMin / 1440);
-  const hours = Math.floor((totalMin % 1440) / 60);
-  const mins = totalMin % 60;
-
-  let text = '';
-  if (days > 0) text += `${days}z `;
-  if (hours > 0 || days > 0) text += `${hours}h `;
-  text += `${mins}m`;
-
-  return { text: `${text} rămase`, active: true, class: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' };
-}
-
-// Formatare Dată Format Local 24h
-function formatLocal24h(d) {
-  if (!d) return 'Nesetat';
-  const dt = new Date(d);
-  if (isNaN(dt.getTime())) return 'Nesetat';
-  return dt.toLocaleString('ro-RO', { timeZone: 'Europe/Chisinau', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
-}
-
-// 12. Pagina Principală a Panoului de Administrare
 
 
 // ============================================================================
