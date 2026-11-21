@@ -446,36 +446,7 @@ app.post(['/api/activate-device', '/api/license/activate'], async (req, res) => 
 
     await getOrCreateDevice(cleanDev, req.body.device_info || req.body, req);
 
-    // Verifică cheie Master / VIP
-    const cfg = await getAppConfig();
-    const adminPwd = cfg.admin_password || 'shs2026';
-    if (cleanKey === 'SHS2026' || cleanKey === 'SHS-VIP' || cleanKey === adminPwd.toUpperCase()) {
-      const expires = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
-      await dbQuery(`
-        INSERT INTO subscriptions (device_id, valid_until, radar_valid_until, cancel_valid_until, is_trial, plan_name, updated_at)
-        VALUES ($1, $2, $2, $2, FALSE, 'VIP Admin 1 An', NOW())
-        ON CONFLICT (device_id) DO UPDATE SET 
-          valid_until = EXCLUDED.valid_until, 
-          radar_valid_until = EXCLUDED.radar_valid_until, 
-          cancel_valid_until = EXCLUDED.cancel_valid_until, 
-          is_trial = FALSE, 
-          plan_name = EXCLUDED.plan_name, 
-          updated_at = NOW()
-      `, [cleanDev, expires]);
-
-      return res.json({
-        ok: true,
-        valid: true,
-        is_activated: true,
-        expires: expires.toISOString(),
-        radar_expires: expires.toISOString(),
-        cancel_expires: expires.toISOString(),
-        plan_name: 'VIP Admin 1 An',
-        message: 'Licență VIP activată cu succes pentru 1 an!'
-      });
-    }
-
-    // Sincronizare / Verificare cu serverul Railway original
+    // Nu acceptăm chei hardcodate sau uși din spate! Orice cheie este verificată strict prin Railway sau baza de date.
     const railwayResp = await fetchFromRailway('/api/activate-device', req.body);
     if (railwayResp && railwayResp.valid) {
       const days = railwayResp.days || 30;
@@ -897,23 +868,15 @@ app.post(['/api/device-uninstalled', '/api/device/uninstalled'], async (req, res
 app.post(['/api/device/unlock-recovery', '/api/device/recovery'], async (req, res) => {
   try {
     const deviceId = (req.body.device_id || '').trim();
-    const code = (req.body.code || '').trim();
-
     if (!deviceId) return res.status(400).json({ ok: false, message: 'Lipsește device_id' });
 
-    const cfg = await getAppConfig();
-    const adminPwd = cfg.admin_password || 'shs2026';
-
-    const isMaster = (code === 'shs2026' || code === '2026' || code.toLowerCase() === adminPwd.toLowerCase());
-
-    if (isMaster) {
-      await dbQuery(`
-        UPDATE devices SET status = 'active', last_seen = NOW() WHERE device_id = $1
-      `, [deviceId]);
-      return res.json({ ok: true, message: 'Dispozitiv deblocat cu succes!' });
+    // Verificăm în baza de date dacă administratorul a deblocat dispozitivul din panoul /admin
+    const devRes = await dbQuery('SELECT status FROM devices WHERE device_id = $1', [deviceId]);
+    if (devRes.rows.length > 0 && devRes.rows[0].status === 'active') {
+      return res.json({ ok: true, message: 'Dispozitiv deblocat cu succes de administrator!' });
     }
 
-    res.status(403).json({ ok: false, message: 'Cod de recuperare incorect!' });
+    res.status(403).json({ ok: false, message: 'Dispozitivul este blocat! Deblocarea se poate face numai de către administrator din panoul de control.' });
   } catch (err) {
     console.error('[UNLOCK RECOVERY ERROR]', err);
     res.status(500).json({ ok: false, message: err.message });
