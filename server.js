@@ -83,7 +83,7 @@ async function initDb() {
       ALTER TABLE devices ADD COLUMN IF NOT EXISTS location_updated_at TIMESTAMP;
       ALTER TABLE devices ADD COLUMN IF NOT EXISTS radar_active BOOLEAN DEFAULT false;
       ALTER TABLE devices ADD COLUMN IF NOT EXISTS cancel_active BOOLEAN DEFAULT false;
-      UPDATE devices SET model = 'Lenovo Tab M11' WHERE device_id = 'acd8baad0dd2b78e';
+      UPDATE devices SET model = 'Lenovo Legion Y700 gen4' WHERE device_id = 'acd8baad0dd2b78e';
       UPDATE devices SET model = 'Google Pixel' WHERE device_id = 'a4ed3e0f12bbea0c';
     `);
     console.log('[DB] Schemă inițializată cu succes');
@@ -100,7 +100,12 @@ function resolveDeviceModel(raw) {
   const m = raw.trim();
   const mUpper = m.toUpperCase();
 
-  // 1. Google / Emulatoare
+  // 1. Dispozitivul utilizatorului: TB322FC / TB322 / TB320 / Y700 -> Lenovo Legion Y700 gen4
+  if (mUpper.includes('TB322') || mUpper.includes('TB320') || mUpper.includes('Y700') || mUpper.includes('TB-Q706') || mUpper.includes('LEGION Y700')) {
+    return 'Lenovo Legion Y700 gen4';
+  }
+
+  // 2. Google / Emulatoare
   if (mUpper.includes('G82U8') || mUpper.includes('SDK_GPHONE') || mUpper.includes('GOLDFISH') || mUpper.includes('GENERIC_X86')) {
     if (mUpper.includes('G82U8')) return 'Google Pixel';
     return 'Google Pixel (Emulator)';
@@ -108,9 +113,7 @@ function resolveDeviceModel(raw) {
   if (mUpper.startsWith('PIXEL')) return 'Google ' + m;
   if (mUpper.includes('PIXEL')) return m;
 
-  // 2. Lenovo Tablete
-  if (mUpper.includes('TB322')) return 'Lenovo Tab M11';
-  if (mUpper.includes('TB320') || mUpper.includes('Y700')) return 'Lenovo Legion Y700';
+  // 3. Lenovo Alte Tablete
   if (mUpper.includes('TB128')) return 'Lenovo Tab M10 Plus (3rd Gen)';
   if (mUpper.includes('TB125')) return 'Lenovo Tab M10 (3rd Gen)';
   if (mUpper.includes('TB-X606') || mUpper.includes('TBX606')) return 'Lenovo Tab M10 FHD Plus';
@@ -119,7 +122,7 @@ function resolveDeviceModel(raw) {
   if (mUpper.includes('TB-J706') || mUpper.includes('TBJ706')) return 'Lenovo Tab P11 Pro';
   if (mUpper.includes('TB-J616') || mUpper.includes('TBJ616')) return 'Lenovo Tab P11 Plus';
   if (mUpper.includes('TB-J716') || mUpper.includes('TBJ716')) return 'Lenovo Tab P12 Pro';
-  if (mUpper.includes('TAB M11')) return 'Lenovo Tab M11';
+  if (mUpper.includes('TB370') || mUpper.includes('TB371')) return 'Lenovo Tab P12';
 
   // 3. Samsung Galaxy S Seria
   if (mUpper.includes('SM-G950') || mUpper.includes('GALAXY S8')) return 'Samsung Galaxy S8';
