@@ -142,21 +142,25 @@ function resolveDeviceModel(raw) {
     return 'Google Pixel (Emulator)';
   }
   if (mUpper.startsWith('PIXEL')) return 'Google ' + m;
-  if (mUpper.includes('PIXEL')) return m;
 
-  // 3. Căutare exactă în baza oficială de 48,000+ modele Google Play
+  // 3. Dacă este deja un nume curat comercial (nu re-converti dacă a fost deja rezolvat!)
+  if (/(galaxy|redmi|poco|pixel|legion|tab|xperia|motorola|huawei|xiaomi|samsung|lenovo|oppo|vivo|oneplus|honor|realme)/i.test(m) && !mUpper.startsWith('SM-') && !/^[0-9]{4,}/.test(m)) {
+    return m;
+  }
+
+  // 4. Căutare exactă în baza oficială de 48,000+ modele Google Play
   const db = getDeviceDbMap();
   if (db && db.has(mLower)) {
     return db.get(mLower);
   }
 
-  // 4. Căutare după prefix cod (ex: "SM-G950F/DS" -> "sm-g950f")
-  const baseCode = mLower.split(/[/_\s]/)[0];
+  // 5. Căutare după prefix cod (ex: "SM-G950F/DS" -> "sm-g950f")
+  const baseCode = mLower.split(/[/_\s-]/)[0];
   if (baseCode && db && db.has(baseCode)) {
     return db.get(baseCode);
   }
 
-  // 5. Lenovo Alte Tablete
+  // 6. Lenovo Alte Tablete
   if (mUpper.includes('TB128')) return 'Lenovo Tab M10 Plus (3rd Gen)';
   if (mUpper.includes('TB125')) return 'Lenovo Tab M10 (3rd Gen)';
   if (mUpper.includes('TB-X606') || mUpper.includes('TBX606')) return 'Lenovo Tab M10 FHD Plus';
@@ -167,7 +171,7 @@ function resolveDeviceModel(raw) {
   if (mUpper.includes('TB-J716') || mUpper.includes('TBJ716')) return 'Lenovo Tab P12 Pro';
   if (mUpper.includes('TB370') || mUpper.includes('TB371')) return 'Lenovo Tab P12';
 
-  // 6. Samsung Seria S (Inclusiv S24, S23, S22, S21 etc.)
+  // 7. Samsung Seria S (Inclusiv S24, S23, S22, S21 etc.)
   if (mUpper.includes('SM-S928')) return 'Samsung Galaxy S24 Ultra';
   if (mUpper.includes('SM-S926')) return 'Samsung Galaxy S24+';
   if (mUpper.includes('SM-S921')) return 'Samsung Galaxy S24';
@@ -187,14 +191,14 @@ function resolveDeviceModel(raw) {
   if (mUpper.includes('SM-G980') || mUpper.includes('SM-G981')) return 'Samsung Galaxy S20';
   if (mUpper.includes('SM-G780') || mUpper.includes('SM-G781')) return 'Samsung Galaxy S20 FE';
   if (mUpper.includes('SM-G975')) return 'Samsung Galaxy S10+';
-  if (mUpper.includes('SM-G973')) return 'Samsung Galaxy S10';
+  if (mUpper.includes('SM-G973') || mUpper.includes('GALAXY S10')) return 'Samsung Galaxy S10';
   if (mUpper.includes('SM-G970')) return 'Samsung Galaxy S10e';
   if (mUpper.includes('SM-G965')) return 'Samsung Galaxy S9+';
   if (mUpper.includes('SM-G960')) return 'Samsung Galaxy S9';
   if (mUpper.includes('SM-G955')) return 'Samsung Galaxy S8+';
   if (mUpper.includes('SM-G950')) return 'Samsung Galaxy S8';
 
-  // 7. Samsung Seria Note
+  // 8. Samsung Seria Note
   if (mUpper.includes('SM-N985') || mUpper.includes('SM-N986')) return 'Samsung Galaxy Note 20 Ultra';
   if (mUpper.includes('SM-N980') || mUpper.includes('SM-N981')) return 'Samsung Galaxy Note 20';
   if (mUpper.includes('SM-N975') || mUpper.includes('SM-N976')) return 'Samsung Galaxy Note 10+';
@@ -202,17 +206,10 @@ function resolveDeviceModel(raw) {
   if (mUpper.includes('SM-N960')) return 'Samsung Galaxy Note 9';
   if (mUpper.includes('SM-N950')) return 'Samsung Galaxy Note 8';
 
-  // 8. Căutare parțială în DB după chei
-  if (db) {
-    for (const [key, val] of db.entries()) {
-      if (key.length >= 5 && mLower.includes(key)) {
-        return val;
-      }
-    }
-  }
-
-  // 9. Dacă conține deja nume de brand/serie comercială
+  // 9. Fallback dacă conține brand
   if (/(galaxy|redmi|poco|pixel|legion|tab|xperia|motorola|huawei|xiaomi|samsung|lenovo|oppo|vivo|oneplus|honor|realme)/i.test(m)) {
+    return m;
+  }
     return m;
   }
 
