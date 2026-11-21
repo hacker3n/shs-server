@@ -525,13 +525,53 @@ app.get('/admin/logout', (req, res) => {
   res.redirect('/admin/login');
 });
 
+// 10. Actualizare Locație GPS & Stare Servicii Live
+app.post('/api/device/location', async (req, res) => {
+  try {
+    const { device_id, lat, lng, speed, radar_active, cancel_active } = req.body;
+    if (!device_id) return res.status(400).json({ ok: false, error: 'device_id_required' });
+
+    await dbQuery(`
+      UPDATE devices SET 
+        lat = $2, 
+        lng = $3, 
+        speed = $4, 
+        radar_active = $5, 
+        cancel_active = $6, 
+        location_updated_at = NOW(),
+        last_seen = NOW()
+      WHERE device_id = $1
+    `, [device_id, lat || null, lng || null, speed || 0, !!radar_active, !!cancel_active]);
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Location error:", err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// 11. Endpoint Live pentru Hartă (JSON)
+app.get('/api/admin/devices-locations', requireAdmin, async (req, res) => {
+  try {
+    const result = await dbQuery(`
+      SELECT d.device_id, d.model, d.app_version, d.status, d.last_seen,
+             d.lat, d.lng, d.speed, d.radar_active, d.cancel_active, d.location_updated_at,
+             s.valid_until, s.is_trial
+      FROM devices d
+      LEFT JOIN subscriptions s ON d.device_id = s.device_id
+      ORDER BY d.last_seen DESC
+    `);
+    res.json({ ok: true, devices: result.rows });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // Pagina Principală a Panoului de Administrare
 app.get('/admin', requireAdmin, async (req, res) => {
-  const cfg = await getAppConfig();
-
-  // Preia dispozitivele și abonamentele din Neon
   const devsRes = await dbQuery(`
     SELECT d.device_id, d.model, d.app_version, d.ip, d.status, d.last_seen,
+           d.lat, d.lng, d.speed, d.radar_active, d.cancel_active, d.location_updated_at,
            s.valid_until, s.plan_name, s.is_trial
     FROM devices d
     LEFT JOIN subscriptions s ON d.device_id = s.device_id
@@ -539,6 +579,8 @@ app.get('/admin', requireAdmin, async (req, res) => {
   `);
 
   const now = new Date();
+  const pad = n => n.toString().padStart(2, '0');
+
   const devices = devsRes.rows.map(d => {
     const validUntil = d.valid_until ? new Date(d.valid_until) : null;
     const isExpired = !validUntil || validUntil < now;
@@ -546,25 +588,72 @@ app.get('/admin', requireAdmin, async (req, res) => {
     let statusText = '🟢 Activ';
     let statusBg = 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
 
+    let remainingText = '';
     if (isBlocked) {
       statusText = '⛔ Blocat';
       statusBg = 'bg-red-500/10 text-red-400 border-red-500/20';
+      remainingText = '<span class="text-rose-400 font-bold">BLOCAT</span>';
     } else if (isExpired) {
       statusText = '🔴 Expirat';
       statusBg = 'bg-rose-500/10 text-rose-400 border-rose-500/20';
-    } else if (d.is_trial) {
-      statusText = '🟡 Trial';
-      statusBg = 'bg-amber-500/10 text-amber-400 border-amber-500/20';
+      remainingText = '<span class="text-rose-400 font-bold">EXPIRAT</span>';
+    } else {
+      if (d.is_trial) {
+        statusText = '🟡 Trial';
+        statusBg = 'bg-amber-500/10 text-amber-400 border-amber-500/20';
+      }
+      const diffMs = validUntil - now;
+      const diffHrs = Math.floor(diffMs / (1000 * 60 * 60));
+      const diffDays = Math.floor(diffHrs / 24);
+      const remHrs = diffHrs % 24;
+      const remMins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+      remainingText = `<span class="text-emerald-400 font-semibold">${diffDays > 0 ? diffDays + 'z ' : ''}${remHrs}h ${remMins}m rămase</span>`;
+    }
+
+    // Calcul dată și oră locală 24h
+    let localDateStr = '';
+    let localHour = '23';
+    let localMin = '59';
+    let formatted24h = 'Niciunul';
+
+    if (validUntil) {
+      // Ajustare pentru fus orar local (UTC+2)
+      const localTime = new Date(validUntil.getTime() + 2 * 60 * 60 * 1000);
+      localDateStr = `${localTime.getUTCFullYear()}-${pad(localTime.getUTCMonth()+1)}-${pad(localTime.getUTCDate())}`;
+      localHour = pad(localTime.getUTCHours());
+      localMin = pad(localTime.getUTCMinutes());
+      formatted24h = `${pad(localTime.getUTCDate())}.${pad(localTime.getUTCMonth()+1)}.${localTime.getUTCFullYear()} la ${localHour}:${localMin} (24h)`;
+    } else {
+      const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000 + 2 * 60 * 60 * 1000);
+      localDateStr = `${tomorrow.getUTCFullYear()}-${pad(tomorrow.getUTCMonth()+1)}-${pad(tomorrow.getUTCDate())}`;
+    }
+
+    // GPS Status
+    const isLive = (d.radar_active || d.cancel_active);
+    let serviceBadge = '<span class="text-slate-500 text-[11px]">Inactiv</span>';
+    if (d.radar_active && d.cancel_active) {
+      serviceBadge = '<span class="px-2 py-0.5 rounded text-[11px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">Radar + Anulare</span>';
+    } else if (d.radar_active) {
+      serviceBadge = '<span class="px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">🟢 Radar Activ</span>';
+    } else if (d.cancel_active) {
+      serviceBadge = '<span class="px-2 py-0.5 rounded text-[11px] font-bold bg-sky-500/20 text-sky-300 border border-sky-500/30">🔵 Anulare Activă</span>';
     }
 
     return {
       ...d,
       statusText,
       statusBg,
-      validUntilFormatted: validUntil ? validUntil.toLocaleString('ro-RO') : 'Niciunul',
-      validUntilIso: validUntil ? validUntil.toISOString().slice(0, 16) : ''
+      remainingText,
+      formatted24h,
+      localDateStr,
+      localHour,
+      localMin,
+      serviceBadge,
+      isLive
     };
   });
+
+  const activeGpsCount = devices.filter(d => d.isLive).length;
 
   res.send(`
     <!DOCTYPE html>
@@ -572,147 +661,188 @@ app.get('/admin', requireAdmin, async (req, res) => {
     <head>
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width, initial-scale=1">
-      <title>Panou Administrare SHS</title>
+      <title>Panou Administrare SHS - Hartă & Dispozitive</title>
       <script src="https://cdn.tailwindcss.com"></script>
+      <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+      <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+      <style>
+        .leaflet-container { background: #0b1118; font-family: inherit; }
+        .custom-pin { display: flex; align-items: center; justify-content: center; border-radius: 50%; font-weight: bold; color: white; box-shadow: 0 0 15px rgba(0,0,0,0.6); }
+        .pulse-green { animation: pulseGreen 1.5s infinite; }
+        @keyframes pulseGreen { 0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); } 70% { box-shadow: 0 0 0 12px rgba(16, 185, 129, 0); } 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); } }
+      </style>
     </head>
     <body class="bg-slate-950 text-slate-100 min-h-screen">
       <!-- Navbar -->
       <nav class="bg-slate-900 border-b border-slate-800 px-6 py-4 flex items-center justify-between sticky top-0 z-50">
         <div class="flex items-center gap-3">
-          <span class="text-2xl">⚡</span>
+          <span class="text-2xl">🚕</span>
           <div>
-            <h1 class="text-lg font-bold text-white">SHS Control Hub</h1>
-            <p class="text-xs text-emerald-400">Conectat la Neon.tech PostgreSQL (eu-central-1)</p>
+            <h1 class="text-lg font-bold text-white">SHS Radar · Control Hub & Live GPS</h1>
+            <p class="text-xs text-emerald-400">Bază de date Neon.tech · Actualizare Live</p>
           </div>
         </div>
         <div class="flex items-center gap-4">
+          <span class="text-xs bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 px-3 py-1.5 rounded-lg flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            ${activeGpsCount} șoferi activi pe traseu
+          </span>
           <span class="text-xs bg-slate-800 text-slate-300 px-3 py-1.5 rounded-lg border border-slate-700">Total: ${devices.length} dispozitive</span>
           <a href="/admin/logout" class="text-xs text-rose-400 hover:text-rose-300 bg-rose-500/10 border border-rose-500/20 px-3 py-1.5 rounded-lg">Ieșire</a>
         </div>
       </nav>
 
       <main class="max-w-7xl mx-auto p-6 space-y-8">
-        
-        <!-- SECȚIUNEA 1: REMOTE CONFIG (SCHIMBARE BUTOANE & PREȚURI LIVE FĂRĂ UPDATE DE APLICAȚIE) -->
-        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
-          <div class="flex items-center justify-between mb-4 border-b border-slate-800 pb-3">
+
+        <!-- SECȚIUNEA 1: HARTA LIVE GPS CU TOȚI ȘOFERII -->
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
+          <div class="flex items-center justify-between border-b border-slate-800 pb-3">
             <div>
-              <h2 class="text-lg font-bold text-white flex items-center gap-2">🎛️ Configurare Live Aplicație (Remote UI & Prețuri)</h2>
-              <p class="text-xs text-slate-400">Modificările de aici se aplică instant pe telefoanele tuturor șoferilor fără să facă update la aplicație!</p>
+              <h2 class="text-lg font-bold text-white flex items-center gap-2">📍 Harta Live a Șoferilor (Radar & Anulare)</h2>
+              <p class="text-xs text-slate-400">Harta arată poziția GPS în timp real a șoferilor când au Radarul sau Anularea pornită.</p>
             </div>
+            <button onclick="updateMap(true)" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs rounded-lg flex items-center gap-1.5 text-slate-200">
+              🔄 Reîmprospătează Harta
+            </button>
           </div>
 
-          <form method="POST" action="/admin/save-config" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            <!-- Nume Buton Radar -->
-            <div class="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
-              <label class="block text-xs font-semibold text-emerald-400">Nume Buton Radar (Bara de Jos)</label>
-              <input type="text" name="radar_button_title" value="${cfg.radar_button_title || 'Radar'}" class="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white text-sm focus:border-emerald-500 focus:outline-none">
-              <p class="text-[11px] text-slate-500">Exemplu: dacă pui "Home", în aplicație va scrie Home pe buton.</p>
-            </div>
-
-            <!-- Preț Abonament Text -->
-            <div class="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
-              <label class="block text-xs font-semibold text-emerald-400">Preț Abonament Afișat</label>
-              <input type="text" name="subscription_price_text" value="${cfg.subscription_price_text || '99 lei'}" class="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white text-sm focus:border-emerald-500 focus:outline-none">
-              <p class="text-[11px] text-slate-500">Exemplu: "80 lei" sau "99 lei". Se schimbă live în aplicație.</p>
-            </div>
-
-            <!-- Username Telegram Suport -->
-            <div class="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
-              <label class="block text-xs font-semibold text-emerald-400">Username Telegram Suport / Vânzare</label>
-              <div class="flex items-center">
-                <span class="px-3 py-2 bg-slate-800 border border-r-0 border-slate-700 rounded-l-lg text-sm text-slate-400">@</span>
-                <input type="text" name="telegram_support_user" value="${(cfg.telegram_support_user || 'neki002').replace('@', '')}" class="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-r-lg text-white text-sm focus:border-emerald-500 focus:outline-none">
-              </div>
-              <p class="text-[11px] text-slate-500">Unde sunt redirecționați șoferii când apasă pe Telegram.</p>
-            </div>
-
-            <!-- Anunț Banner Global -->
-            <div class="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2 md:col-span-2">
-              <label class="block text-xs font-semibold text-emerald-400">Mesaj Anunț Important (Banner în Aplicație)</label>
-              <input type="text" name="announcement_text" value="${cfg.announcement_text || ''}" placeholder="Ex: Întreținere server duminică la 03:00" class="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white text-sm focus:border-emerald-500 focus:outline-none">
-              <div class="flex items-center gap-2 mt-1">
-                <input type="checkbox" name="announcement_enabled" value="true" ${cfg.announcement_enabled === 'true' ? 'checked' : ''} id="chkAnn">
-                <label for="chkAnn" class="text-xs text-slate-300">Activează afișarea bannerului</label>
-              </div>
-            </div>
-
-            <!-- Buton Salvează Configurația -->
-            <div class="flex items-end">
-              <button type="submit" class="w-full py-3 bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold rounded-xl transition shadow-lg shadow-emerald-500/20">💾 Salvează Modificările Live</button>
-            </div>
-          </form>
+          <div id="map" style="height: 480px; width: 100%;" class="rounded-xl border border-slate-800 overflow-hidden shadow-inner"></div>
         </div>
 
-        <!-- SECȚIUNEA 2: GESTIONARE DISPOZITIVE & ABONAMENTE CU DATE-PICKER -->
-        <div class="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden">
-          <div class="p-6 border-b border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <!-- SECȚIUNEA 2: LISTA DISPOZITIVELOR & CONTROL ABONAMENTE EXACTE 24H -->
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
             <div>
-              <h2 class="text-lg font-bold text-white flex items-center gap-2">📱 Dispozitive & Control Rapid Abonamente</h2>
-              <p class="text-xs text-slate-400">Setează data exactă de expirare, acordă prelungiri sau șterge dispozitive complet.</p>
+              <h2 class="text-lg font-bold text-white flex items-center gap-2">📱 Dispozitive Înregistrate & Setare Abonament</h2>
+              <p class="text-xs text-slate-400">Setează data și ora exactă în <b>format 24h (00:00 - 23:59)</b>. Fără confuzie AM / PM!</p>
             </div>
-            <input type="text" id="devSearch" onkeyup="filterDevices()" placeholder="🔍 Caută după ID sau Model..." class="px-4 py-2 bg-slate-950 border border-slate-700 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-white w-full md:w-64">
+            <div class="w-full sm:w-72">
+              <input type="text" id="devSearch" onkeyup="filterDevices()" placeholder="Caută după ID dispozitiv sau model..." class="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500">
+            </div>
           </div>
 
           <div class="overflow-x-auto">
-            <table class="w-full text-left text-sm" id="devicesTable">
-              <thead class="bg-slate-950/60 text-xs uppercase text-slate-400 border-b border-slate-800">
-                <tr>
-                  <th class="px-6 py-4">Dispozitiv (ID & Model)</th>
-                  <th class="px-6 py-4">Stare</th>
-                  <th class="px-6 py-4">Valabil Până La</th>
-                  <th class="px-6 py-4">Setează Data Exactă</th>
-                  <th class="px-6 py-4">Acțiuni Rapide</th>
+            <table class="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr class="border-b border-slate-800 text-slate-400 bg-slate-950/50">
+                  <th class="px-4 py-3">Dispozitiv & Model</th>
+                  <th class="px-4 py-3">Stare Serviciu</th>
+                  <th class="px-4 py-3">Expiră la (Format 24h)</th>
+                  <th class="px-4 py-3 min-w-[320px]">Setează Data & Ora Expirării (24h)</th>
+                  <th class="px-4 py-3">Acțiuni Rapide</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-slate-800">
                 ${devices.map(d => `
-                  <tr class="hover:bg-slate-800/40 transition dev-row" data-search="${d.device_id.toLowerCase()} ${d.model.toLowerCase()}">
-                    <td class="px-6 py-4">
+                  <tr class="hover:bg-slate-800/40 transition dev-row" id="row-${d.device_id}" data-search="${d.device_id.toLowerCase()} ${(d.model||'').toLowerCase()}">
+                    
+                    <!-- Dispozitiv & Model -->
+                    <td class="px-4 py-4">
                       <div class="font-mono font-bold text-white text-xs">${d.device_id}</div>
-                      <div class="text-xs text-slate-400">${d.model || 'Model necunoscut'} · v${d.app_version || '2.6.9'}</div>
-                      <div class="text-[10px] text-slate-500">Ultima activitate: ${new Date(d.last_seen).toLocaleString('ro-RO')}</div>
+                      <div class="text-[11px] text-slate-400 mt-0.5">${d.model || 'Model necunoscut'} · v${d.app_version || '2.6.9'}</div>
+                      <div class="text-[10px] text-slate-500 mt-0.5">Activ: ${new Date(d.last_seen).toLocaleString('ro-RO')}</div>
                     </td>
-                    <td class="px-6 py-4">
-                      <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border ${d.statusBg}">
-                        ${d.statusText}
-                      </span>
+
+                    <!-- Stare Serviciu & GPS -->
+                    <td class="px-4 py-4">
+                      <div class="space-y-1">
+                        ${d.serviceBadge}
+                        <div>${d.remainingText}</div>
+                        ${d.lat && d.lng ? `
+                          <button onclick="flyToDevice('${d.device_id}')" class="text-[11px] text-sky-400 hover:text-sky-300 underline flex items-center gap-1 mt-1">
+                            📍 Vezi pe hartă (${d.speed ? Math.round(d.speed) + ' km/h' : '0 km/h'})
+                          </button>
+                        ` : '<div class="text-[10px] text-slate-600">Fără semnal GPS</div>'}
+                      </div>
                     </td>
-                    <td class="px-6 py-4 text-xs font-medium text-slate-200">
-                      ${d.validUntilFormatted}
+
+                    <!-- Expiră la -->
+                    <td class="px-4 py-4 font-medium text-slate-200">
+                      <div class="text-xs font-semibold">${d.formatted24h}</div>
+                      <div class="text-[10px] text-slate-400 mt-0.5">${d.statusText}</div>
                     </td>
-                    <td class="px-6 py-4">
-                      <form method="POST" action="/admin/set-subscription-date" class="flex items-center gap-2">
+
+                    <!-- Formular Setare Dată & Oră (24h) -->
+                    <td class="px-4 py-4">
+                      <form method="POST" action="/admin/set-subscription-date" class="space-y-2 bg-slate-950/80 p-2.5 rounded-xl border border-slate-800">
                         <input type="hidden" name="device_id" value="${d.device_id}">
-                        <input type="datetime-local" name="valid_until" value="${d.validUntilIso}" required class="px-2.5 py-1.5 bg-slate-950 border border-slate-700 rounded-lg text-xs text-white focus:outline-none focus:border-emerald-500">
-                        <button type="submit" class="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold text-xs rounded-lg transition">Setează</button>
+                        <div class="flex items-center gap-2">
+                          <div>
+                            <label class="block text-[10px] text-slate-400 mb-0.5 font-semibold">Data</label>
+                            <input type="date" name="expire_date" value="${d.localDateStr}" required class="px-2 py-1 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white focus:outline-none focus:border-emerald-500">
+                          </div>
+
+                          <div>
+                            <label class="block text-[10px] text-slate-400 mb-0.5 font-semibold">Ora (24h)</label>
+                            <select name="expire_hour" class="px-2 py-1 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white focus:outline-none focus:border-emerald-500">
+                              ${Array.from({length: 24}, (_, i) => {
+                                const hStr = pad(i);
+                                const selected = hStr === d.localHour ? 'selected' : '';
+                                let label = hStr + ':00';
+                                if (i === 0) label += ' (Miezul nopții)';
+                                else if (i === 3) label += ' (03:00 noaptea)';
+                                else if (i === 12) label += ' (12:00 amiază)';
+                                else if (i === 15) label += ' (15:00 după-amiază)';
+                                return `<option value="${hStr}" ${selected}>${label}</option>`;
+                              }).join('')}
+                            </select>
+                          </div>
+
+                          <div>
+                            <label class="block text-[10px] text-slate-400 mb-0.5 font-semibold">Minut</label>
+                            <select name="expire_minute" class="px-2 py-1 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white focus:outline-none focus:border-emerald-500">
+                              ${['00','05','10','15','20','25','30','35','40','45','50','55','59'].map(m => `
+                                <option value="${m}" ${m === d.localMin ? 'selected' : ''}>:${m}</option>
+                              `).join('')}
+                            </select>
+                          </div>
+                        </div>
+
+                        <div class="flex items-center justify-between pt-1">
+                          <span class="text-[10px] text-slate-500">Fus orar local Chișinău (EET)</span>
+                          <button type="submit" class="px-3 py-1 bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold text-xs rounded-lg transition shadow">
+                            💾 Salvează Ora
+                          </button>
+                        </div>
                       </form>
                     </td>
-                    <td class="px-6 py-4">
-                      <div class="flex items-center gap-2">
+
+                    <!-- Acțiuni Rapide (+1h, +24h, +30z, Blochează, Șterge) -->
+                    <td class="px-4 py-4">
+                      <div class="flex flex-wrap items-center gap-1.5 max-w-[200px]">
+                        <!-- +1 Oră -->
+                        <form method="POST" action="/admin/add-hours">
+                          <input type="hidden" name="device_id" value="${d.device_id}">
+                          <input type="hidden" name="hours" value="1">
+                          <button type="submit" title="Prelungește cu 1 oră" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-[11px] rounded border border-slate-700 text-slate-300">+1h</button>
+                        </form>
+
+                        <!-- +12 Ore -->
+                        <form method="POST" action="/admin/add-hours">
+                          <input type="hidden" name="device_id" value="${d.device_id}">
+                          <input type="hidden" name="hours" value="12">
+                          <button type="submit" title="Prelungește cu 12 ore" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-[11px] rounded border border-slate-700 text-slate-300">+12h</button>
+                        </form>
+
                         <!-- +30 Zile -->
                         <form method="POST" action="/admin/add-days">
                           <input type="hidden" name="device_id" value="${d.device_id}">
                           <input type="hidden" name="days" value="30">
-                          <button type="submit" title="Prelungește cu 30 de zile" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-xs rounded-lg border border-slate-700 text-slate-200">+30 Zile</button>
+                          <button type="submit" title="Prelungește cu 30 de zile" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-[11px] rounded border border-slate-700 text-slate-300">+30z</button>
                         </form>
-                        <!-- +1 An -->
-                        <form method="POST" action="/admin/add-days">
-                          <input type="hidden" name="device_id" value="${d.device_id}">
-                          <input type="hidden" name="days" value="365">
-                          <button type="submit" title="Prelungește cu 1 an" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-xs rounded-lg border border-slate-700 text-slate-200">+1 An</button>
-                        </form>
+
                         <!-- Blochează / Deblochează -->
                         <form method="POST" action="/admin/toggle-block">
                           <input type="hidden" name="device_id" value="${d.device_id}">
-                          <button type="submit" class="px-2.5 py-1 text-xs rounded-lg border ${d.status === 'blocked' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-amber-500/10 text-amber-400 border-amber-500/20'}">
+                          <button type="submit" class="px-2 py-1 text-[11px] rounded border ${d.status === 'blocked' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-amber-500/10 text-amber-400 border-amber-500/20'}">
                             ${d.status === 'blocked' ? 'Deblochează' : 'Blochează'}
                           </button>
                         </form>
+
                         <!-- Șterge Dispozitiv -->
                         <form method="POST" action="/admin/delete-device" onsubmit="return confirm('Ești sigur că vrei să ștergi definitiv acest dispozitiv?');">
                           <input type="hidden" name="device_id" value="${d.device_id}">
-                          <button type="submit" title="Șterge dispozitiv definitiv" class="px-2.5 py-1 text-xs rounded-lg bg-rose-500/10 text-rose-400 hover:bg-rose-500 hover:text-white border border-rose-500/20 transition">Șterge Disp</button>
+                          <button type="submit" title="Șterge dispozitiv definitiv" class="px-2 py-1 text-[11px] rounded bg-rose-500/10 text-rose-400 hover:bg-rose-500 hover:text-white border border-rose-500/20 transition">Șterge</button>
                         </form>
                       </div>
                     </td>
@@ -724,7 +854,95 @@ app.get('/admin', requireAdmin, async (req, res) => {
         </div>
       </main>
 
+      <!-- LEAFLET MAP SCRIPT -->
       <script>
+        const map = L.map('map').setView([47.0245, 28.8322], 12);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+          attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+          subdomains: 'abcd',
+          maxZoom: 19
+        }).addTo(map);
+
+        const markers = {};
+
+        function createPinHtml(color, icon) {
+          return '<div class="custom-pin pulse-green" style="background:' + color + '; width:32px; height:32px; font-size:16px;">' + icon + '</div>';
+        }
+
+        async function updateMap(manual) {
+          try {
+            const res = await fetch('/api/admin/devices-locations');
+            const data = await res.json();
+            if (!data.ok || !data.devices) return;
+
+            const bounds = [];
+            data.devices.forEach(d => {
+              if (!d.lat || !d.lng) return;
+
+              let iconChar = '🚕';
+              let pinColor = '#10b981'; // green radar
+              let statusLabel = '🟢 Radar Activ';
+
+              if (d.radar_active && d.cancel_active) {
+                pinColor = '#f59e0b'; // amber
+                statusLabel = '🟡 Radar + Anulare Active';
+              } else if (d.cancel_active) {
+                pinColor = '#0ea5e9'; // sky
+                statusLabel = '🔵 Anulare Activă';
+              } else if (!d.radar_active && !d.cancel_active) {
+                pinColor = '#64748b'; // gray
+                statusLabel = '⚪ Inactiv';
+              }
+
+              const customIcon = L.divIcon({
+                className: 'custom-leaflet-icon',
+                html: createPinHtml(pinColor, iconChar),
+                iconSize: [32, 32],
+                iconAnchor: [16, 16]
+              });
+
+              const popupHtml = `
+                <div class="text-slate-900 p-2 space-y-1 font-sans">
+                  <div class="font-bold text-sm">${d.model || 'Model'} (${d.device_id.slice(0,8)}...)</div>
+                  <div class="text-xs font-semibold" style="color:${pinColor}">${statusLabel}</div>
+                  <div class="text-xs">⚡ Viteză: <b>${d.speed ? Math.round(d.speed) : 0} km/h</b></div>
+                  <div class="text-[11px] text-slate-600">ID complet: ${d.device_id}</div>
+                  <div class="text-[10px] text-slate-500">Actualizat: ${new Date(d.location_updated_at || d.last_seen).toLocaleTimeString('ro-RO')}</div>
+                </div>
+              `;
+
+              if (markers[d.device_id]) {
+                markers[d.device_id].setLatLng([d.lat, d.lng]);
+                markers[d.device_id].setIcon(customIcon);
+                markers[d.device_id].setPopupContent(popupHtml);
+              } else {
+                const marker = L.marker([d.lat, d.lng], { icon: customIcon }).addTo(map);
+                marker.bindPopup(popupHtml);
+                markers[d.device_id] = marker;
+              }
+
+              bounds.push([d.lat, d.lng]);
+            });
+
+            if (manual && bounds.length > 0) {
+              map.fitBounds(bounds, { padding: [50, 50], maxZoom: 15 });
+            }
+          } catch (e) {
+            console.error("Map update error:", e);
+          }
+        }
+
+        function flyToDevice(devId) {
+          if (markers[devId]) {
+            const ll = markers[devId].getLatLng();
+            map.flyTo(ll, 16);
+            markers[devId].openPopup();
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          } else {
+            alert("Acest dispozitiv nu a trimis încă coordonate GPS.");
+          }
+        }
+
         function filterDevices() {
           const q = document.getElementById('devSearch').value.toLowerCase();
           const rows = document.querySelectorAll('.dev-row');
@@ -733,41 +951,49 @@ app.get('/admin', requireAdmin, async (req, res) => {
             r.style.display = data.includes(q) ? '' : 'none';
           });
         }
+
+        // Inițializare & refresh automat la fiecare 5 secunde
+        updateMap(true);
+        setInterval(() => updateMap(false), 5000);
       </script>
     </body>
     </html>
   `);
 });
 
-// Acțiune: Salvare Configurație Live
-app.post('/admin/save-config', requireAdmin, async (req, res) => {
-  const {
-    radar_button_title,
-    subscription_price_text,
-    telegram_support_user,
-    announcement_text,
-    announcement_enabled
-  } = req.body;
-
-  if (radar_button_title) await setAppConfigKey('radar_button_title', radar_button_title.trim());
-  if (subscription_price_text) await setAppConfigKey('subscription_price_text', subscription_price_text.trim());
-  if (telegram_support_user) await setAppConfigKey('telegram_support_user', telegram_support_user.replace('@', '').trim());
-  await setAppConfigKey('announcement_text', (announcement_text || '').trim());
-  await setAppConfigKey('announcement_enabled', announcement_enabled === 'true' ? 'true' : 'false');
-
-  res.redirect('/admin');
-});
-
-// Acțiune: Setare Dată Exactă Abonament
+// Acțiune: Setare Dată & Oră Exactă Abonament (Format 24h)
 app.post('/admin/set-subscription-date', requireAdmin, async (req, res) => {
-  const { device_id, valid_until } = req.body;
-  if (device_id && valid_until) {
-    const targetDate = new Date(valid_until);
+  const { device_id, expire_date, expire_hour, expire_minute } = req.body;
+  if (device_id && expire_date) {
+    const h = (expire_hour || '23').toString().padStart(2, '0');
+    const m = (expire_minute || '59').toString().padStart(2, '0');
+    // Parsare cu fus orar local Chișinău/București (+02:00)
+    const targetDate = new Date(`${expire_date}T${h}:${m}:00+02:00`);
     await dbQuery(`
       INSERT INTO subscriptions (device_id, valid_until, is_trial, updated_at)
       VALUES ($1, $2, FALSE, NOW())
       ON CONFLICT (device_id) DO UPDATE SET valid_until = EXCLUDED.valid_until, is_trial = FALSE, updated_at = NOW()
     `, [device_id, targetDate]);
+  }
+  res.redirect('/admin');
+});
+
+// Acțiune: Adăugare Ore la Abonament (+1h / +12h)
+app.post('/admin/add-hours', requireAdmin, async (req, res) => {
+  const { device_id, hours } = req.body;
+  const numHours = parseInt(hours, 10) || 1;
+  if (device_id) {
+    const subRes = await dbQuery('SELECT valid_until FROM subscriptions WHERE device_id = $1', [device_id]);
+    let baseDate = new Date();
+    if (subRes.rows.length > 0 && new Date(subRes.rows[0].valid_until) > baseDate) {
+      baseDate = new Date(subRes.rows[0].valid_until);
+    }
+    const newExpires = new Date(baseDate.getTime() + numHours * 60 * 60 * 1000);
+    await dbQuery(`
+      INSERT INTO subscriptions (device_id, valid_until, is_trial, updated_at)
+      VALUES ($1, $2, FALSE, NOW())
+      ON CONFLICT (device_id) DO UPDATE SET valid_until = EXCLUDED.valid_until, is_trial = FALSE, updated_at = NOW()
+    `, [device_id, newExpires]);
   }
   res.redirect('/admin');
 });
