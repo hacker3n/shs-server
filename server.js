@@ -901,15 +901,13 @@ app.get('/admin', requireAdmin, async (req, res) => {
                 iconAnchor: [16, 16]
               });
 
-              const popupHtml = `
-                <div class="text-slate-900 p-2 space-y-1 font-sans">
-                  <div class="font-bold text-sm">${d.model || 'Model'} (${d.device_id.slice(0,8)}...)</div>
-                  <div class="text-xs font-semibold" style="color:${pinColor}">${statusLabel}</div>
-                  <div class="text-xs">⚡ Viteză: <b>${d.speed ? Math.round(d.speed) : 0} km/h</b></div>
-                  <div class="text-[11px] text-slate-600">ID complet: ${d.device_id}</div>
-                  <div class="text-[10px] text-slate-500">Actualizat: ${new Date(d.location_updated_at || d.last_seen).toLocaleTimeString('ro-RO')}</div>
-                </div>
-              `;
+              const popupHtml = '<div class="text-slate-900 p-2 space-y-1 font-sans">' +
+                '<div class="font-bold text-sm">' + (d.model || 'Model') + ' (' + d.device_id.slice(0,8) + '...)</div>' +
+                '<div class="text-xs font-semibold" style="color:' + pinColor + '">' + statusLabel + '</div>' +
+                '<div class="text-xs">⚡ Viteză: <b>' + (d.speed ? Math.round(d.speed) : 0) + ' km/h</b></div>' +
+                '<div class="text-[11px] text-slate-600">ID: ' + d.device_id + '</div>' +
+                '<div class="text-[10px] text-slate-500">Actualizat: ' + new Date(d.location_updated_at || d.last_seen).toLocaleTimeString('ro-RO') + '</div>' +
+                '</div>';
 
               if (markers[d.device_id]) {
                 markers[d.device_id].setLatLng([d.lat, d.lng]);
