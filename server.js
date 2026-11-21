@@ -393,6 +393,11 @@ app.post('/api/contest', async (req, res) => {
   res.json({ ok: true, top: [], count: 0, my: { place: 0, count: 0 } });
 });
 
+// Geocoder endpoint (Shared Geocoder SHS)
+app.post(['/api/geocode', '/api/geocode/miss'], (req, res) => {
+  res.json({ ok: true, found: false });
+});
+
 // ============================================================================
 // 8. Dynamic Remote Core Loader (Anti-Hack / Remote DEX & Separate Subscriptions)
 // ============================================================================
