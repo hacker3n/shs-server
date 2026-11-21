@@ -451,6 +451,8 @@ app.post(['/api/core/download', '/api/core/payload'], async (req, res) => {
 
     res.setHeader('Content-Type', 'application/octet-stream');
     res.setHeader('X-Core-Version', CORE_VERSION);
+    res.setHeader('X-Expires-Ms', validUntil.getTime().toString());
+    res.setHeader('X-Valid-Until', validUntil.toISOString());
     fs.createReadStream(corePath).pipe(res);
   } catch (err) {
     console.error("Core download error:", err);
