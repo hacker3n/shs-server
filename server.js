@@ -393,7 +393,72 @@ app.post('/api/contest', async (req, res) => {
   res.json({ ok: true, top: [], count: 0, my: { place: 0, count: 0 } });
 });
 
-// 8. Descărcare APK
+// 8. Dynamic Remote Core Loader (Anti-Hack / Remote DEX)
+const CORE_VERSION = "2.6.9.1";
+
+app.post(['/api/core/check', '/api/core/status'], async (req, res) => {
+  try {
+    const deviceId = (req.body.device_id || '').trim();
+    if (!deviceId) return res.json({ ok: false, valid: false, error: 'device_id_required' });
+
+    const dev = await getOrCreateDevice(deviceId, req.body.device_info || req.body, req);
+    const isBlocked = dev && dev.status === 'blocked';
+
+    const subRes = await dbQuery('SELECT * FROM subscriptions WHERE device_id = $1', [deviceId]);
+    const sub = subRes.rows.length > 0 ? subRes.rows[0] : null;
+
+    const now = new Date();
+    const validUntil = sub ? new Date(sub.valid_until) : new Date(0);
+    const isValid = !isBlocked && (validUntil > now);
+
+    res.json({
+      ok: true,
+      valid: isValid,
+      blocked: isBlocked,
+      expires: validUntil.toISOString(),
+      version: CORE_VERSION,
+      message: isBlocked ? "Dispozitiv blocat de administrator!" : (isValid ? "OK" : "Abonament expirat! Contactează @neki002 pe Telegram.")
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post(['/api/core/download', '/api/core/payload'], async (req, res) => {
+  try {
+    const deviceId = (req.body.device_id || '').trim();
+    if (!deviceId) return res.status(400).json({ ok: false, error: 'device_id_required' });
+
+    const dev = await getOrCreateDevice(deviceId, req.body.device_info || req.body, req);
+    if (dev && dev.status === 'blocked') {
+      return res.status(403).json({ ok: false, error: 'blocked', message: 'Dispozitiv blocat!' });
+    }
+
+    const subRes = await dbQuery('SELECT * FROM subscriptions WHERE device_id = $1', [deviceId]);
+    const sub = subRes.rows.length > 0 ? subRes.rows[0] : null;
+    const now = new Date();
+    const validUntil = sub ? new Date(sub.valid_until) : new Date(0);
+    const isValid = validUntil > now;
+
+    if (!isValid) {
+      return res.status(403).json({ ok: false, error: 'subscription_expired', message: 'Abonament expirat! Contactează @neki002 pe Telegram.' });
+    }
+
+    const corePath = path.join(__dirname, 'payload', 'core.enc');
+    if (!fs.existsSync(corePath)) {
+      return res.status(404).json({ ok: false, error: 'payload_not_found' });
+    }
+
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('X-Core-Version', CORE_VERSION);
+    fs.createReadStream(corePath).pipe(res);
+  } catch (err) {
+    console.error("Core download error:", err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// 9. Descărcare APK
 app.get('/download/SHS_Final.apk', (req, res) => {
   const apkPath = path.join(__dirname, '..', '..', 'Apk', 'Modded Apk', 'SHS', 'SHS_Final.apk');
   if (fs.existsSync(apkPath)) {
