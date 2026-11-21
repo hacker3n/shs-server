@@ -435,6 +435,78 @@ app.post('/api/request-trial', async (req, res) => {
   });
 });
 
+// 2.1. Activare Licență prin Cheie (Key Activation)
+app.post(['/api/activate-device', '/api/license/activate'], async (req, res) => {
+  try {
+    const { key, device_id, nonce } = req.body;
+    const cleanKey = (key || '').trim().toUpperCase();
+    const cleanDev = (device_id || '').trim();
+
+    if (!cleanDev) return res.status(400).json({ valid: false, message: 'Lipsește device_id' });
+
+    await getOrCreateDevice(cleanDev, req.body.device_info || req.body, req);
+
+    // Verifică cheie Master / VIP
+    const cfg = await getAppConfig();
+    const adminPwd = cfg.admin_password || 'shs2026';
+    if (cleanKey === 'SHS2026' || cleanKey === 'SHS-VIP' || cleanKey === adminPwd.toUpperCase()) {
+      const expires = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
+      await dbQuery(`
+        INSERT INTO subscriptions (device_id, valid_until, radar_valid_until, cancel_valid_until, is_trial, plan_name, updated_at)
+        VALUES ($1, $2, $2, $2, FALSE, 'VIP Admin 1 An', NOW())
+        ON CONFLICT (device_id) DO UPDATE SET 
+          valid_until = EXCLUDED.valid_until, 
+          radar_valid_until = EXCLUDED.radar_valid_until, 
+          cancel_valid_until = EXCLUDED.cancel_valid_until, 
+          is_trial = FALSE, 
+          plan_name = EXCLUDED.plan_name, 
+          updated_at = NOW()
+      `, [cleanDev, expires]);
+
+      return res.json({
+        ok: true,
+        valid: true,
+        is_activated: true,
+        expires: expires.toISOString(),
+        radar_expires: expires.toISOString(),
+        cancel_expires: expires.toISOString(),
+        plan_name: 'VIP Admin 1 An',
+        message: 'Licență VIP activată cu succes pentru 1 an!'
+      });
+    }
+
+    // Sincronizare / Verificare cu serverul Railway original
+    const railwayResp = await fetchFromRailway('/api/activate-device', req.body);
+    if (railwayResp && railwayResp.valid) {
+      const days = railwayResp.days || 30;
+      const expires = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+      await dbQuery(`
+        INSERT INTO subscriptions (device_id, valid_until, radar_valid_until, cancel_valid_until, is_trial, plan_name, updated_at)
+        VALUES ($1, $2, $2, $2, FALSE, $3, NOW())
+        ON CONFLICT (device_id) DO UPDATE SET 
+          valid_until = EXCLUDED.valid_until, 
+          radar_valid_until = EXCLUDED.radar_valid_until, 
+          cancel_valid_until = EXCLUDED.cancel_valid_until, 
+          is_trial = FALSE, 
+          plan_name = EXCLUDED.plan_name, 
+          updated_at = NOW()
+      `, [cleanDev, expires, `Abonament ${days} Zile`]);
+      return res.json(railwayResp);
+    } else if (railwayResp) {
+      return res.json(railwayResp);
+    }
+
+    res.json({
+      ok: false,
+      valid: false,
+      message: 'Cheie de licență invalidă sau deja utilizată!'
+    });
+  } catch (err) {
+    console.error('[ACTIVATE DEVICE ERROR]', err);
+    res.status(500).json({ ok: false, valid: false, message: 'Eroare activare cheie: ' + err.message });
+  }
+});
+
 // 3. Remote Config & Live UI Endpoint (Nume Butoane, Prețuri, Telegram)
 app.get(['/api/app-config', '/api/app/config'], async (req, res) => {
   const cfg = await getAppConfig();
@@ -775,6 +847,76 @@ app.post('/api/device/location', async (req, res) => {
   } catch (err) {
     console.error("Location error:", err);
     res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// 10.1. Notificare Dispozitiv Offline (Serviciu Oprit / Ieșire Aplicație)
+app.post(['/api/device-offline', '/api/device/offline'], async (req, res) => {
+  try {
+    const deviceId = (req.body.device_id || '').trim();
+    if (deviceId) {
+      await dbQuery(`
+        UPDATE devices SET 
+          radar_active = false, 
+          cancel_active = false, 
+          location_updated_at = NOW(), 
+          last_seen = NOW() 
+        WHERE device_id = $1
+      `, [deviceId]);
+    }
+    res.json({ ok: true, status: 'offline' });
+  } catch (err) {
+    console.error('[DEVICE OFFLINE ERROR]', err);
+    res.json({ ok: true });
+  }
+});
+
+// 10.2. Notificare Dezinstalare Dispozitiv (Uninstall / Reset)
+app.post(['/api/device-uninstalled', '/api/device/uninstalled'], async (req, res) => {
+  try {
+    const deviceId = (req.body.device_id || '').trim();
+    if (deviceId) {
+      await dbQuery(`
+        UPDATE devices SET 
+          status = 'uninstalled', 
+          radar_active = false, 
+          cancel_active = false, 
+          location_updated_at = NOW(), 
+          last_seen = NOW() 
+        WHERE device_id = $1
+      `, [deviceId]);
+    }
+    res.json({ ok: true, status: 'uninstalled' });
+  } catch (err) {
+    console.error('[DEVICE UNINSTALLED ERROR]', err);
+    res.json({ ok: true });
+  }
+});
+
+// 10.3. Deblocare / Recuperare Dispozitiv (Unlock Recovery)
+app.post(['/api/device/unlock-recovery', '/api/device/recovery'], async (req, res) => {
+  try {
+    const deviceId = (req.body.device_id || '').trim();
+    const code = (req.body.code || '').trim();
+
+    if (!deviceId) return res.status(400).json({ ok: false, message: 'Lipsește device_id' });
+
+    const cfg = await getAppConfig();
+    const adminPwd = cfg.admin_password || 'shs2026';
+
+    const isMaster = (code === 'shs2026' || code === '2026' || code.toLowerCase() === adminPwd.toLowerCase());
+
+    if (isMaster) {
+      await dbQuery(`
+        UPDATE devices SET status = 'active', last_seen = NOW() WHERE device_id = $1
+      `, [deviceId]);
+      return res.json({ ok: true, message: 'Dispozitiv deblocat cu succes!' });
+    }
+
+    res.status(403).json({ ok: false, message: 'Cod de recuperare incorect!' });
+  } catch (err) {
+    console.error('[UNLOCK RECOVERY ERROR]', err);
+    res.status(500).json({ ok: false, message: err.message });
   }
 });
 
