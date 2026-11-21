@@ -97,122 +97,116 @@ async function initDb() {
 // ----------------------------------------------------------------------------
 function resolveDeviceModel(raw) {
   if (!raw || typeof raw !== 'string') return 'Dispozitiv Android';
-  let m = raw.trim();
-
-  // Curățare prefixe duplicate (ex: 'google Google', 'samsung samsung')
-  m = m.replace(/^(google|samsung|xiaomi|lenovo|huawei|oppo|vivo|motorola|oneplus)\s+/i, '');
+  const m = raw.trim();
+  const mUpper = m.toUpperCase();
 
   // 1. Google / Emulatoare
-  if (/G82U8/i.test(m)) return 'Google Pixel';
-  if (/sdk_gphone/i.test(m)) return 'Google Pixel (Emulator)';
-  if (/google_sdk|generic_x86|emulator/i.test(m)) return 'Android Emulator';
-  if (/pixel\s*8\s*pro/i.test(m)) return 'Google Pixel 8 Pro';
-  if (/pixel\s*8/i.test(m)) return 'Google Pixel 8';
-  if (/pixel\s*7\s*pro/i.test(m)) return 'Google Pixel 7 Pro';
-  if (/pixel\s*7/i.test(m)) return 'Google Pixel 7';
-  if (/pixel\s*6\s*pro/i.test(m)) return 'Google Pixel 6 Pro';
-  if (/pixel\s*6/i.test(m)) return 'Google Pixel 6';
-  if (/pixel/i.test(m)) return 'Google Pixel';
+  if (mUpper.includes('G82U8') || mUpper.includes('SDK_GPHONE') || mUpper.includes('GOLDFISH') || mUpper.includes('GENERIC_X86')) {
+    if (mUpper.includes('G82U8')) return 'Google Pixel';
+    return 'Google Pixel (Emulator)';
+  }
+  if (mUpper.startsWith('PIXEL')) return 'Google ' + m;
+  if (mUpper.includes('PIXEL')) return m;
 
   // 2. Lenovo Tablete
-  if (/TB322/i.test(m)) return 'Lenovo Tab M11';
-  if (/TB320|Y700/i.test(m)) return 'Lenovo Legion Y700';
-  if (/TB128/i.test(m)) return 'Lenovo Tab M10 Plus (3rd Gen)';
-  if (/TB125/i.test(m)) return 'Lenovo Tab M10 (3rd Gen)';
-  if (/TB-?X606/i.test(m)) return 'Lenovo Tab M10 FHD Plus';
-  if (/TB-?X505/i.test(m)) return 'Lenovo Tab M10';
-  if (/TB-?J606/i.test(m)) return 'Lenovo Tab P11';
-  if (/TB-?J706/i.test(m)) return 'Lenovo Tab P11 Pro';
-  if (/TB-?J616/i.test(m)) return 'Lenovo Tab P11 Plus';
-  if (/TB-?J716/i.test(m)) return 'Lenovo Tab P12 Pro';
+  if (mUpper.includes('TB322')) return 'Lenovo Tab M11';
+  if (mUpper.includes('TB320') || mUpper.includes('Y700')) return 'Lenovo Legion Y700';
+  if (mUpper.includes('TB128')) return 'Lenovo Tab M10 Plus (3rd Gen)';
+  if (mUpper.includes('TB125')) return 'Lenovo Tab M10 (3rd Gen)';
+  if (mUpper.includes('TB-X606') || mUpper.includes('TBX606')) return 'Lenovo Tab M10 FHD Plus';
+  if (mUpper.includes('TB-X505') || mUpper.includes('TBX505')) return 'Lenovo Tab M10';
+  if (mUpper.includes('TB-J606') || mUpper.includes('TBJ606')) return 'Lenovo Tab P11';
+  if (mUpper.includes('TB-J706') || mUpper.includes('TBJ706')) return 'Lenovo Tab P11 Pro';
+  if (mUpper.includes('TB-J616') || mUpper.includes('TBJ616')) return 'Lenovo Tab P11 Plus';
+  if (mUpper.includes('TB-J716') || mUpper.includes('TBJ716')) return 'Lenovo Tab P12 Pro';
+  if (mUpper.includes('TAB M11')) return 'Lenovo Tab M11';
 
   // 3. Samsung Galaxy S Seria
-  if (/SM-G950/i.test(m)) return 'Samsung Galaxy S8';
-  if (/SM-G955/i.test(m)) return 'Samsung Galaxy S8+';
-  if (/SM-G960/i.test(m)) return 'Samsung Galaxy S9';
-  if (/SM-G965/i.test(m)) return 'Samsung Galaxy S9+';
-  if (/SM-G970/i.test(m)) return 'Samsung Galaxy S10e';
-  if (/SM-G973/i.test(m)) return 'Samsung Galaxy S10';
-  if (/SM-G975/i.test(m)) return 'Samsung Galaxy S10+';
-  if (/SM-G977/i.test(m)) return 'Samsung Galaxy S10 5G';
-  if (/SM-G770/i.test(m)) return 'Samsung Galaxy S10 Lite';
-  if (/SM-G980|SM-G981/i.test(m)) return 'Samsung Galaxy S20';
-  if (/SM-G985|SM-G986/i.test(m)) return 'Samsung Galaxy S20+';
-  if (/SM-G988/i.test(m)) return 'Samsung Galaxy S20 Ultra';
-  if (/SM-G780|SM-G781/i.test(m)) return 'Samsung Galaxy S20 FE';
-  if (/SM-G990/i.test(m)) return 'Samsung Galaxy S21 FE';
-  if (/SM-G991/i.test(m)) return 'Samsung Galaxy S21';
-  if (/SM-G996/i.test(m)) return 'Samsung Galaxy S21+';
-  if (/SM-G998/i.test(m)) return 'Samsung Galaxy S21 Ultra';
-  if (/SM-S901/i.test(m)) return 'Samsung Galaxy S22';
-  if (/SM-S906/i.test(m)) return 'Samsung Galaxy S22+';
-  if (/SM-S908/i.test(m)) return 'Samsung Galaxy S22 Ultra';
-  if (/SM-S711/i.test(m)) return 'Samsung Galaxy S23 FE';
-  if (/SM-S911/i.test(m)) return 'Samsung Galaxy S23';
-  if (/SM-S916/i.test(m)) return 'Samsung Galaxy S23+';
-  if (/SM-S918/i.test(m)) return 'Samsung Galaxy S23 Ultra';
-  if (/SM-S921/i.test(m)) return 'Samsung Galaxy S24';
-  if (/SM-S926/i.test(m)) return 'Samsung Galaxy S24+';
-  if (/SM-S928/i.test(m)) return 'Samsung Galaxy S24 Ultra';
+  if (mUpper.includes('SM-G950') || mUpper.includes('GALAXY S8')) return 'Samsung Galaxy S8';
+  if (mUpper.includes('SM-G955')) return 'Samsung Galaxy S8+';
+  if (mUpper.includes('SM-G960') || mUpper.includes('GALAXY S9')) return 'Samsung Galaxy S9';
+  if (mUpper.includes('SM-G965')) return 'Samsung Galaxy S9+';
+  if (mUpper.includes('SM-G970')) return 'Samsung Galaxy S10e';
+  if (mUpper.includes('SM-G973') || mUpper.includes('GALAXY S10')) return 'Samsung Galaxy S10';
+  if (mUpper.includes('SM-G975')) return 'Samsung Galaxy S10+';
+  if (mUpper.includes('SM-G977')) return 'Samsung Galaxy S10 5G';
+  if (mUpper.includes('SM-G770')) return 'Samsung Galaxy S10 Lite';
+  if (mUpper.includes('SM-G980') || mUpper.includes('SM-G981') || mUpper.includes('GALAXY S20')) return 'Samsung Galaxy S20';
+  if (mUpper.includes('SM-G985') || mUpper.includes('SM-G986')) return 'Samsung Galaxy S20+';
+  if (mUpper.includes('SM-G988')) return 'Samsung Galaxy S20 Ultra';
+  if (mUpper.includes('SM-G780') || mUpper.includes('SM-G781')) return 'Samsung Galaxy S20 FE';
+  if (mUpper.includes('SM-G990')) return 'Samsung Galaxy S21 FE';
+  if (mUpper.includes('SM-G991') || mUpper.includes('GALAXY S21')) return 'Samsung Galaxy S21';
+  if (mUpper.includes('SM-G996')) return 'Samsung Galaxy S21+';
+  if (mUpper.includes('SM-G998')) return 'Samsung Galaxy S21 Ultra';
+  if (mUpper.includes('SM-S901') || mUpper.includes('GALAXY S22')) return 'Samsung Galaxy S22';
+  if (mUpper.includes('SM-S906')) return 'Samsung Galaxy S22+';
+  if (mUpper.includes('SM-S908')) return 'Samsung Galaxy S22 Ultra';
+  if (mUpper.includes('SM-S711')) return 'Samsung Galaxy S23 FE';
+  if (mUpper.includes('SM-S911') || mUpper.includes('GALAXY S23')) return 'Samsung Galaxy S23';
+  if (mUpper.includes('SM-S916')) return 'Samsung Galaxy S23+';
+  if (mUpper.includes('SM-S918')) return 'Samsung Galaxy S23 Ultra';
+  if (mUpper.includes('SM-S921') || mUpper.includes('GALAXY S24')) return 'Samsung Galaxy S24';
+  if (mUpper.includes('SM-S926')) return 'Samsung Galaxy S24+';
+  if (mUpper.includes('SM-S928')) return 'Samsung Galaxy S24 Ultra';
 
   // 4. Samsung Galaxy Note Seria
-  if (/SM-N950/i.test(m)) return 'Samsung Galaxy Note 8';
-  if (/SM-N960/i.test(m)) return 'Samsung Galaxy Note 9';
-  if (/SM-N970|SM-N971/i.test(m)) return 'Samsung Galaxy Note 10';
-  if (/SM-N975|SM-N976/i.test(m)) return 'Samsung Galaxy Note 10+';
-  if (/SM-N770/i.test(m)) return 'Samsung Galaxy Note 10 Lite';
-  if (/SM-N980|SM-N981/i.test(m)) return 'Samsung Galaxy Note 20';
-  if (/SM-N985|SM-N986/i.test(m)) return 'Samsung Galaxy Note 20 Ultra';
-  if (/SM-N935|gracelte/i.test(m)) return 'Samsung Galaxy Note FE';
+  if (mUpper.includes('SM-N950')) return 'Samsung Galaxy Note 8';
+  if (mUpper.includes('SM-N960')) return 'Samsung Galaxy Note 9';
+  if (mUpper.includes('SM-N970') || mUpper.includes('SM-N971')) return 'Samsung Galaxy Note 10';
+  if (mUpper.includes('SM-N975') || mUpper.includes('SM-N976')) return 'Samsung Galaxy Note 10+';
+  if (mUpper.includes('SM-N770')) return 'Samsung Galaxy Note 10 Lite';
+  if (mUpper.includes('SM-N980') || mUpper.includes('SM-N981')) return 'Samsung Galaxy Note 20';
+  if (mUpper.includes('SM-N985') || mUpper.includes('SM-N986')) return 'Samsung Galaxy Note 20 Ultra';
+  if (mUpper.includes('SM-N935') || mUpper.includes('GRACELTE')) return 'Samsung Galaxy Note FE';
 
   // 5. Samsung Galaxy A Seria
-  if (/SM-A10/i.test(m)) return 'Samsung Galaxy A10';
-  if (/SM-A12/i.test(m)) return 'Samsung Galaxy A12';
-  if (/SM-A13/i.test(m)) return 'Samsung Galaxy A13';
-  if (/SM-A14/i.test(m)) return 'Samsung Galaxy A14';
-  if (/SM-A15/i.test(m)) return 'Samsung Galaxy A15';
-  if (/SM-A20/i.test(m)) return 'Samsung Galaxy A20';
-  if (/SM-A21/i.test(m)) return 'Samsung Galaxy A21';
-  if (/SM-A22/i.test(m)) return 'Samsung Galaxy A22';
-  if (/SM-A23/i.test(m)) return 'Samsung Galaxy A23';
-  if (/SM-A24/i.test(m)) return 'Samsung Galaxy A24';
-  if (/SM-A25/i.test(m)) return 'Samsung Galaxy A25';
-  if (/SM-A30/i.test(m)) return 'Samsung Galaxy A30';
-  if (/SM-A31/i.test(m)) return 'Samsung Galaxy A31';
-  if (/SM-A32/i.test(m)) return 'Samsung Galaxy A32';
-  if (/SM-A33/i.test(m)) return 'Samsung Galaxy A33';
-  if (/SM-A34/i.test(m)) return 'Samsung Galaxy A34';
-  if (/SM-A35/i.test(m)) return 'Samsung Galaxy A35';
-  if (/SM-A50/i.test(m)) return 'Samsung Galaxy A50';
-  if (/SM-A51/i.test(m)) return 'Samsung Galaxy A51';
-  if (/SM-A52/i.test(m)) return 'Samsung Galaxy A52';
-  if (/SM-A53/i.test(m)) return 'Samsung Galaxy A53';
-  if (/SM-A54/i.test(m)) return 'Samsung Galaxy A54';
-  if (/SM-A55/i.test(m)) return 'Samsung Galaxy A55';
-  if (/SM-A70/i.test(m)) return 'Samsung Galaxy A70';
-  if (/SM-A71/i.test(m)) return 'Samsung Galaxy A71';
-  if (/SM-A72/i.test(m)) return 'Samsung Galaxy A72';
-  if (/SM-A73/i.test(m)) return 'Samsung Galaxy A73';
+  if (mUpper.includes('SM-A10')) return 'Samsung Galaxy A10';
+  if (mUpper.includes('SM-A12')) return 'Samsung Galaxy A12';
+  if (mUpper.includes('SM-A13')) return 'Samsung Galaxy A13';
+  if (mUpper.includes('SM-A14')) return 'Samsung Galaxy A14';
+  if (mUpper.includes('SM-A15')) return 'Samsung Galaxy A15';
+  if (mUpper.includes('SM-A20')) return 'Samsung Galaxy A20';
+  if (mUpper.includes('SM-A21')) return 'Samsung Galaxy A21';
+  if (mUpper.includes('SM-A22')) return 'Samsung Galaxy A22';
+  if (mUpper.includes('SM-A23')) return 'Samsung Galaxy A23';
+  if (mUpper.includes('SM-A24')) return 'Samsung Galaxy A24';
+  if (mUpper.includes('SM-A25')) return 'Samsung Galaxy A25';
+  if (mUpper.includes('SM-A30')) return 'Samsung Galaxy A30';
+  if (mUpper.includes('SM-A31')) return 'Samsung Galaxy A31';
+  if (mUpper.includes('SM-A32')) return 'Samsung Galaxy A32';
+  if (mUpper.includes('SM-A33')) return 'Samsung Galaxy A33';
+  if (mUpper.includes('SM-A34')) return 'Samsung Galaxy A34';
+  if (mUpper.includes('SM-A35')) return 'Samsung Galaxy A35';
+  if (mUpper.includes('SM-A50')) return 'Samsung Galaxy A50';
+  if (mUpper.includes('SM-A51')) return 'Samsung Galaxy A51';
+  if (mUpper.includes('SM-A52')) return 'Samsung Galaxy A52';
+  if (mUpper.includes('SM-A53')) return 'Samsung Galaxy A53';
+  if (mUpper.includes('SM-A54')) return 'Samsung Galaxy A54';
+  if (mUpper.includes('SM-A55')) return 'Samsung Galaxy A55';
+  if (mUpper.includes('SM-A70')) return 'Samsung Galaxy A70';
+  if (mUpper.includes('SM-A71')) return 'Samsung Galaxy A71';
+  if (mUpper.includes('SM-A72')) return 'Samsung Galaxy A72';
+  if (mUpper.includes('SM-A73')) return 'Samsung Galaxy A73';
 
   // 6. Xiaomi / Redmi / POCO
-  if (/2201116/i.test(m)) return 'Redmi Note 11 Pro';
-  if (/2201117/i.test(m)) return 'Redmi Note 11';
-  if (/2312DRA50G/i.test(m)) return 'Redmi Note 13 Pro 5G';
-  if (/23117RA68G/i.test(m)) return 'Redmi Note 13 Pro';
-  if (/23129RAA4G/i.test(m)) return 'Redmi Note 13';
-  if (/23049PCD8G/i.test(m)) return 'POCO F5';
-  if (/23013PC75G/i.test(m)) return 'POCO X5 Pro';
-  if (/22011211G/i.test(m)) return 'POCO X4 Pro';
-  if (/M2012K11/i.test(m)) return 'POCO F3';
-  if (/M2102J20SG/i.test(m)) return 'POCO X3 Pro';
+  if (mUpper.includes('2201116')) return 'Redmi Note 11 Pro';
+  if (mUpper.includes('2201117')) return 'Redmi Note 11';
+  if (mUpper.includes('2312DRA50G')) return 'Redmi Note 13 Pro 5G';
+  if (mUpper.includes('23117RA68G')) return 'Redmi Note 13 Pro';
+  if (mUpper.includes('23129RAA4G')) return 'Redmi Note 13';
+  if (mUpper.includes('23049PCD8G')) return 'POCO F5';
+  if (mUpper.includes('23013PC75G')) return 'POCO X5 Pro';
+  if (mUpper.includes('22011211G')) return 'POCO X4 Pro';
+  if (mUpper.includes('M2012K11')) return 'POCO F3';
+  if (mUpper.includes('M2102J20SG')) return 'POCO X3 Pro';
 
-  // Dacă conține deja un nume curat (Galaxy, Redmi, POCO, Pixel, etc.)
-  if (/(galaxy|redmi|poco|pixel|legion|tab|moto|xperia|honor)/i.test(m)) {
+  // Dacă conține deja nume curat
+  if (/(galaxy|redmi|poco|pixel|legion|tab|xperia|motorola|huawei|xiaomi|samsung|lenovo)/i.test(m)) {
     return m;
   }
 
-  // Formatare generală: eliminare coduri hex/build din coadă
-  return m.replace(/\s+[0-9A-Za-z]{6,12}$/, '').trim();
+  return m.replace(/\s+[0-9A-Za-z]{6,12}$/, '').trim() || 'Dispozitiv Android';
 }
 
 // Obține sau creează dispozitiv
