@@ -83,6 +83,8 @@ async function initDb() {
       ALTER TABLE devices ADD COLUMN IF NOT EXISTS location_updated_at TIMESTAMP;
       ALTER TABLE devices ADD COLUMN IF NOT EXISTS radar_active BOOLEAN DEFAULT false;
       ALTER TABLE devices ADD COLUMN IF NOT EXISTS cancel_active BOOLEAN DEFAULT false;
+      UPDATE devices SET model = 'Lenovo Tab M11' WHERE device_id = 'acd8baad0dd2b78e';
+      UPDATE devices SET model = 'Google Pixel' WHERE device_id = 'a4ed3e0f12bbea0c';
     `);
     console.log('[DB] Schemă inițializată cu succes');
   } catch (err) {
@@ -90,12 +92,136 @@ async function initDb() {
   }
 }
 
+// ----------------------------------------------------------------------------
+// Rezolvator Nume Comercial Model Dispozitiv (ex: SM-G950F -> Samsung Galaxy S8)
+// ----------------------------------------------------------------------------
+function resolveDeviceModel(raw) {
+  if (!raw || typeof raw !== 'string') return 'Dispozitiv Android';
+  let m = raw.trim();
+
+  // Curățare prefixe duplicate (ex: 'google Google', 'samsung samsung')
+  m = m.replace(/^(google|samsung|xiaomi|lenovo|huawei|oppo|vivo|motorola|oneplus)\s+/i, '');
+
+  // 1. Google / Emulatoare
+  if (/G82U8/i.test(m)) return 'Google Pixel';
+  if (/sdk_gphone/i.test(m)) return 'Google Pixel (Emulator)';
+  if (/google_sdk|generic_x86|emulator/i.test(m)) return 'Android Emulator';
+  if (/pixel\s*8\s*pro/i.test(m)) return 'Google Pixel 8 Pro';
+  if (/pixel\s*8/i.test(m)) return 'Google Pixel 8';
+  if (/pixel\s*7\s*pro/i.test(m)) return 'Google Pixel 7 Pro';
+  if (/pixel\s*7/i.test(m)) return 'Google Pixel 7';
+  if (/pixel\s*6\s*pro/i.test(m)) return 'Google Pixel 6 Pro';
+  if (/pixel\s*6/i.test(m)) return 'Google Pixel 6';
+  if (/pixel/i.test(m)) return 'Google Pixel';
+
+  // 2. Lenovo Tablete
+  if (/TB322/i.test(m)) return 'Lenovo Tab M11';
+  if (/TB320|Y700/i.test(m)) return 'Lenovo Legion Y700';
+  if (/TB128/i.test(m)) return 'Lenovo Tab M10 Plus (3rd Gen)';
+  if (/TB125/i.test(m)) return 'Lenovo Tab M10 (3rd Gen)';
+  if (/TB-?X606/i.test(m)) return 'Lenovo Tab M10 FHD Plus';
+  if (/TB-?X505/i.test(m)) return 'Lenovo Tab M10';
+  if (/TB-?J606/i.test(m)) return 'Lenovo Tab P11';
+  if (/TB-?J706/i.test(m)) return 'Lenovo Tab P11 Pro';
+  if (/TB-?J616/i.test(m)) return 'Lenovo Tab P11 Plus';
+  if (/TB-?J716/i.test(m)) return 'Lenovo Tab P12 Pro';
+
+  // 3. Samsung Galaxy S Seria
+  if (/SM-G950/i.test(m)) return 'Samsung Galaxy S8';
+  if (/SM-G955/i.test(m)) return 'Samsung Galaxy S8+';
+  if (/SM-G960/i.test(m)) return 'Samsung Galaxy S9';
+  if (/SM-G965/i.test(m)) return 'Samsung Galaxy S9+';
+  if (/SM-G970/i.test(m)) return 'Samsung Galaxy S10e';
+  if (/SM-G973/i.test(m)) return 'Samsung Galaxy S10';
+  if (/SM-G975/i.test(m)) return 'Samsung Galaxy S10+';
+  if (/SM-G977/i.test(m)) return 'Samsung Galaxy S10 5G';
+  if (/SM-G770/i.test(m)) return 'Samsung Galaxy S10 Lite';
+  if (/SM-G980|SM-G981/i.test(m)) return 'Samsung Galaxy S20';
+  if (/SM-G985|SM-G986/i.test(m)) return 'Samsung Galaxy S20+';
+  if (/SM-G988/i.test(m)) return 'Samsung Galaxy S20 Ultra';
+  if (/SM-G780|SM-G781/i.test(m)) return 'Samsung Galaxy S20 FE';
+  if (/SM-G990/i.test(m)) return 'Samsung Galaxy S21 FE';
+  if (/SM-G991/i.test(m)) return 'Samsung Galaxy S21';
+  if (/SM-G996/i.test(m)) return 'Samsung Galaxy S21+';
+  if (/SM-G998/i.test(m)) return 'Samsung Galaxy S21 Ultra';
+  if (/SM-S901/i.test(m)) return 'Samsung Galaxy S22';
+  if (/SM-S906/i.test(m)) return 'Samsung Galaxy S22+';
+  if (/SM-S908/i.test(m)) return 'Samsung Galaxy S22 Ultra';
+  if (/SM-S711/i.test(m)) return 'Samsung Galaxy S23 FE';
+  if (/SM-S911/i.test(m)) return 'Samsung Galaxy S23';
+  if (/SM-S916/i.test(m)) return 'Samsung Galaxy S23+';
+  if (/SM-S918/i.test(m)) return 'Samsung Galaxy S23 Ultra';
+  if (/SM-S921/i.test(m)) return 'Samsung Galaxy S24';
+  if (/SM-S926/i.test(m)) return 'Samsung Galaxy S24+';
+  if (/SM-S928/i.test(m)) return 'Samsung Galaxy S24 Ultra';
+
+  // 4. Samsung Galaxy Note Seria
+  if (/SM-N950/i.test(m)) return 'Samsung Galaxy Note 8';
+  if (/SM-N960/i.test(m)) return 'Samsung Galaxy Note 9';
+  if (/SM-N970|SM-N971/i.test(m)) return 'Samsung Galaxy Note 10';
+  if (/SM-N975|SM-N976/i.test(m)) return 'Samsung Galaxy Note 10+';
+  if (/SM-N770/i.test(m)) return 'Samsung Galaxy Note 10 Lite';
+  if (/SM-N980|SM-N981/i.test(m)) return 'Samsung Galaxy Note 20';
+  if (/SM-N985|SM-N986/i.test(m)) return 'Samsung Galaxy Note 20 Ultra';
+  if (/SM-N935|gracelte/i.test(m)) return 'Samsung Galaxy Note FE';
+
+  // 5. Samsung Galaxy A Seria
+  if (/SM-A10/i.test(m)) return 'Samsung Galaxy A10';
+  if (/SM-A12/i.test(m)) return 'Samsung Galaxy A12';
+  if (/SM-A13/i.test(m)) return 'Samsung Galaxy A13';
+  if (/SM-A14/i.test(m)) return 'Samsung Galaxy A14';
+  if (/SM-A15/i.test(m)) return 'Samsung Galaxy A15';
+  if (/SM-A20/i.test(m)) return 'Samsung Galaxy A20';
+  if (/SM-A21/i.test(m)) return 'Samsung Galaxy A21';
+  if (/SM-A22/i.test(m)) return 'Samsung Galaxy A22';
+  if (/SM-A23/i.test(m)) return 'Samsung Galaxy A23';
+  if (/SM-A24/i.test(m)) return 'Samsung Galaxy A24';
+  if (/SM-A25/i.test(m)) return 'Samsung Galaxy A25';
+  if (/SM-A30/i.test(m)) return 'Samsung Galaxy A30';
+  if (/SM-A31/i.test(m)) return 'Samsung Galaxy A31';
+  if (/SM-A32/i.test(m)) return 'Samsung Galaxy A32';
+  if (/SM-A33/i.test(m)) return 'Samsung Galaxy A33';
+  if (/SM-A34/i.test(m)) return 'Samsung Galaxy A34';
+  if (/SM-A35/i.test(m)) return 'Samsung Galaxy A35';
+  if (/SM-A50/i.test(m)) return 'Samsung Galaxy A50';
+  if (/SM-A51/i.test(m)) return 'Samsung Galaxy A51';
+  if (/SM-A52/i.test(m)) return 'Samsung Galaxy A52';
+  if (/SM-A53/i.test(m)) return 'Samsung Galaxy A53';
+  if (/SM-A54/i.test(m)) return 'Samsung Galaxy A54';
+  if (/SM-A55/i.test(m)) return 'Samsung Galaxy A55';
+  if (/SM-A70/i.test(m)) return 'Samsung Galaxy A70';
+  if (/SM-A71/i.test(m)) return 'Samsung Galaxy A71';
+  if (/SM-A72/i.test(m)) return 'Samsung Galaxy A72';
+  if (/SM-A73/i.test(m)) return 'Samsung Galaxy A73';
+
+  // 6. Xiaomi / Redmi / POCO
+  if (/2201116/i.test(m)) return 'Redmi Note 11 Pro';
+  if (/2201117/i.test(m)) return 'Redmi Note 11';
+  if (/2312DRA50G/i.test(m)) return 'Redmi Note 13 Pro 5G';
+  if (/23117RA68G/i.test(m)) return 'Redmi Note 13 Pro';
+  if (/23129RAA4G/i.test(m)) return 'Redmi Note 13';
+  if (/23049PCD8G/i.test(m)) return 'POCO F5';
+  if (/23013PC75G/i.test(m)) return 'POCO X5 Pro';
+  if (/22011211G/i.test(m)) return 'POCO X4 Pro';
+  if (/M2012K11/i.test(m)) return 'POCO F3';
+  if (/M2102J20SG/i.test(m)) return 'POCO X3 Pro';
+
+  // Dacă conține deja un nume curat (Galaxy, Redmi, POCO, Pixel, etc.)
+  if (/(galaxy|redmi|poco|pixel|legion|tab|moto|xperia|honor)/i.test(m)) {
+    return m;
+  }
+
+  // Formatare generală: eliminare coduri hex/build din coadă
+  return m.replace(/\s+[0-9A-Za-z]{6,12}$/, '').trim();
+}
+
 // Obține sau creează dispozitiv
 async function getOrCreateDevice(deviceId, deviceInfo = {}, req = null) {
   if (!deviceId) return null;
   deviceInfo = deviceInfo || {};
   const ip = req ? (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim() : '';
-  const model = deviceInfo.model || deviceInfo.device_model || '';
+  const rawModel = deviceInfo.model || deviceInfo.device_model || '';
+  const model = resolveDeviceModel(rawModel);
   const appVersion = deviceInfo.app_version || '';
 
   // Verifică dacă există
@@ -644,7 +770,8 @@ app.get('/api/admin/devices-locations', requireAdmin, async (req, res) => {
       LEFT JOIN subscriptions s ON d.device_id = s.device_id
       ORDER BY d.last_seen DESC
     `);
-    res.json({ ok: true, devices: result.rows });
+    const cleanDevices = result.rows.map(d => ({ ...d, model: resolveDeviceModel(d.model) }));
+    res.json({ ok: true, devices: cleanDevices });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
@@ -746,8 +873,10 @@ app.get('/admin', requireAdmin, async (req, res) => {
       ? `<button onclick="flyToDevice('${d.device_id}')" class="px-2.5 py-1 text-xs rounded-md bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/20 font-medium transition flex items-center gap-1">📍 Pe Hartă</button>`
       : '';
 
+    const displayModel = resolveDeviceModel(d.model);
+
     return `
-      <div class="bg-slate-900/90 border border-slate-800 hover:border-slate-700/80 rounded-2xl p-5 shadow-xl transition space-y-4 dev-card" data-search="${(d.device_id + ' ' + (d.model || '')).toLowerCase()}">
+      <div class="bg-slate-900/90 border border-slate-800 hover:border-slate-700/80 rounded-2xl p-5 shadow-xl transition space-y-4 dev-card" data-search="${(d.device_id + ' ' + displayModel).toLowerCase()}">
         
         <!-- Antet Dispozitiv -->
         <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
@@ -757,7 +886,7 @@ app.get('/admin', requireAdmin, async (req, res) => {
             </div>
             <div>
               <div class="flex items-center gap-2">
-                <span class="font-bold text-white text-base">${d.model || 'Model Necunoscut'}</span>
+                <span class="font-bold text-white text-base">${displayModel}</span>
                 ${isBlocked 
                   ? '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30">BLOCAT</span>' 
                   : '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">ACTIV</span>'}
