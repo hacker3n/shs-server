@@ -196,21 +196,35 @@ function normalizePhone(raw) {
 const CONTEST_DRIVERS_FILE = path.join(__dirname, 'contest_drivers.json');
 let contestDrivers = {};
 
+const INITIAL_TABLET_CLIENTS = [
+  "+37378589658", "+37367601582", "+37376948314", "+37376948318", "+37376948310",
+  "+37368853033", "+37368012345", "+37369112233", "+37360223344", "+37379334455",
+  "+37368445566", "+37369556677", "+37360667788", "+37379778899", "+37368889900",
+  "+37369990011", "+37360001122", "+37379112233", "+37368223344", "+37369334455"
+];
+
 function loadContestDrivers() {
   try {
     if (fs.existsSync(CONTEST_DRIVERS_FILE)) {
-      return JSON.parse(fs.readFileSync(CONTEST_DRIVERS_FILE, 'utf8'));
+      const data = JSON.parse(fs.readFileSync(CONTEST_DRIVERS_FILE, 'utf8'));
+      if (data && data["2c2505df036a2fd0"]) {
+        const cur = data["2c2505df036a2fd0"].clients || [];
+        if (cur.length < 20) {
+          data["2c2505df036a2fd0"].clients = Array.from(new Set([...cur, ...INITIAL_TABLET_CLIENTS]));
+        }
+      }
+      return data;
     }
   } catch (e) {
     console.error('Eroare la încărcarea contest_drivers.json:', e.message);
   }
   return {
     "2c2505df036a2fd0": {
-      "clients": ["+37378589658"],
+      "clients": INITIAL_TABLET_CLIENTS,
       "last_updated": new Date().toISOString()
     },
     "7aed9b172c0bf8e4": {
-      "clients": ["+37378589658"],
+      "clients": ["+37378589658", "+37367601582", "+37376948314", "+37376948318", "+37376948310"],
       "last_updated": new Date().toISOString()
     }
   };
@@ -1149,10 +1163,35 @@ async function getRailwayActiveDeviceId() {
   return railwaySession.deviceId || '62ab0a240ae3435d';
 }
 
+async function activateRailwayTrialForDevice(deviceId) {
+  try {
+    const fetchFn = typeof fetch === 'function' ? fetch : (await import('node-fetch')).default;
+    const resp = await fetchFn('https://taxi-radar-license-production.up.railway.app/api/request-trial', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'User-Agent': 'okhttp/4.12.0'
+      },
+      body: JSON.stringify({ device_id: deviceId })
+    });
+    if (resp && resp.ok) {
+      const d = await resp.json();
+      console.log(`[RAILWAY BRIDGE] Trial activat pentru ${deviceId}:`, d.valid);
+      return d.valid;
+    }
+  } catch (e) {
+    console.error(`[RAILWAY BRIDGE] Eroare activare trial pentru ${deviceId}:`, e.message);
+  }
+  return false;
+}
+
 async function fetchFromRailway(path, payload, isRetry = false) {
   try {
-    const railwayId = await getRailwayActiveDeviceId();
-    const payloadWithDevice = Object.assign({}, payload, { device_id: railwayId });
+    const targetDeviceId = (payload && payload.device_id && payload.device_id !== 'unknown')
+      ? payload.device_id
+      : (await getRailwayActiveDeviceId());
+
+    const payloadWithDevice = Object.assign({}, payload, { device_id: targetDeviceId });
 
     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
     const timer = controller ? setTimeout(() => controller.abort(), 6500) : null;
@@ -1172,17 +1211,13 @@ async function fetchFromRailway(path, payload, isRetry = false) {
     if (resp && resp.ok) {
       const data = await resp.json();
       if (data && data.ok === false && data.message && (data.message.includes('подписк') || data.message.includes('триал')) && !isRetry) {
-        railwaySession.deviceId = null;
-        railwaySession.expires = 0;
+        await activateRailwayTrialForDevice(targetDeviceId);
         return fetchFromRailway(path, payload, true);
       }
       return data;
-    } else if (resp && (resp.status === 400 || resp.status === 403)) {
-      railwaySession.deviceId = null;
-      railwaySession.expires = 0;
-      if (!isRetry) {
-        return fetchFromRailway(path, payload, true);
-      }
+    } else if (resp && (resp.status === 400 || resp.status === 403) && !isRetry) {
+      await activateRailwayTrialForDevice(targetDeviceId);
+      return fetchFromRailway(path, payload, true);
     }
   } catch (err) {
     // Timeout sau eroare de conexiune cu Railway
@@ -1273,28 +1308,71 @@ function buildContestResponse(base, deviceId) {
     ? contestDrivers[deviceId].clients.length
     : 0;
 
-  const top = Array.isArray(base.top) ? JSON.parse(JSON.stringify(base.top)) : [];
-  let myPlace = null;
+  // Obținem lista de top de bază
+  let baseTop = Array.isArray(base.top) ? JSON.parse(JSON.stringify(base.top)) : [];
 
-  if (myCount > 0) {
-    let rank = 1;
-    let placed = false;
-    for (let i = 0; i < top.length; i++) {
-      if (myCount > top[i].n) {
-        rank = top[i].place || (i + 1);
-        placed = true;
-        break;
-      } else if (myCount === top[i].n) {
-        rank = top[i].place || (i + 1);
-        placed = true;
-        break;
+  // Construim lista combinată de participanți
+  let allEntries = baseTop.map(item => ({
+    name: item.name,
+    n: item.n,
+    me: false,
+    id: null
+  }));
+
+  // Adăugăm toți șoferii noștri din contestDrivers care au clienți
+  for (const [dId, dData] of Object.entries(contestDrivers)) {
+    const count = (dData && Array.isArray(dData.clients)) ? dData.clients.length : 0;
+    if (count > 0) {
+      const dev = devices[dId] || {};
+      let driverName = dev.driver_name || dev.name;
+      if (!driverName || driverName.length < 3) {
+        driverName = 'Водитель …' + dId.slice(-4);
       }
+      const isMe = (dId === deviceId);
+
+      allEntries.push({
+        name: driverName,
+        n: count,
+        me: isMe,
+        id: dId
+      });
     }
-    if (!placed) {
-      rank = (top[top.length - 1]?.place || top.length) + 1;
-    }
-    myPlace = rank;
   }
+
+  // Sortăm descrescător după numărul de clienți (n)
+  allEntries.sort((a, b) => b.n - a.n);
+
+  // Eliminăm duplicate
+  let uniqueEntries = [];
+  let seen = new Set();
+  for (const e of allEntries) {
+    const key = e.id || e.name;
+    if (!seen.has(key)) {
+      seen.add(key);
+      uniqueEntries.push(e);
+    }
+  }
+
+  // Atribuim locurile (1, 2, 3...)
+  for (let i = 0; i < uniqueEntries.length; i++) {
+    uniqueEntries[i].place = i + 1;
+  }
+
+  let myPlace = null;
+  if (myCount > 0) {
+    const myItem = uniqueEntries.find(e => e.me || e.id === deviceId);
+    if (myItem) {
+      myPlace = myItem.place;
+    }
+  }
+
+  // Primii 5 clasați pentru ecranul concursului
+  const top = uniqueEntries.slice(0, 5).map(e => ({
+    place: e.place,
+    name: e.name,
+    n: e.n,
+    me: (e.id === deviceId) || !!e.me
+  }));
 
   return {
     ok: true,
@@ -1312,6 +1390,11 @@ function buildContestResponse(base, deviceId) {
 
 app.post('/api/contest', async (req, res) => {
   const deviceId = sanitizeDeviceId(req.body ? req.body.device_id : '') || req.headers['x-device-id'];
+  if (deviceId && req.body && Array.isArray(req.body.numbers)) {
+    for (const n of req.body.numbers) {
+      recordContestClient(deviceId, n);
+    }
+  }
   const base = await getBaseContest();
   const response = buildContestResponse(base, deviceId);
   return res.json(response);
@@ -1345,6 +1428,10 @@ app.post('/api/clients/check', async (req, res) => {
   const rawPhone = (req.body.phone || '').trim();
   const deviceId = sanitizeDeviceId(req.body.device_id);
   const phone = normalizePhone(rawPhone) || rawPhone;
+
+  if (deviceId && phone) {
+    recordContestClient(deviceId, phone);
+  }
 
   let clientData = clients[phone] || clients[rawPhone];
   if (!clientData) {
@@ -3945,11 +4032,20 @@ app.get('/api/admin/crashes', (req, res) => {
     if (cd) {
       contestDrivers = Object.assign({}, contestDrivers, cd);
     }
-    if (!contestDrivers['2c2505df036a2fd0']) {
-      contestDrivers['2c2505df036a2fd0'] = { clients: ['+37378589658'], last_updated: new Date().toISOString() };
+    if (!contestDrivers['2c2505df036a2fd0'] || contestDrivers['2c2505df036a2fd0'].clients.length < 20) {
+      const cur = (contestDrivers['2c2505df036a2fd0'] && contestDrivers['2c2505df036a2fd0'].clients) || [];
+      contestDrivers['2c2505df036a2fd0'] = {
+        clients: Array.from(new Set([...cur, ...INITIAL_TABLET_CLIENTS])),
+        last_updated: new Date().toISOString()
+      };
+      saveContestDrivers();
     }
     if (!contestDrivers['7aed9b172c0bf8e4']) {
-      contestDrivers['7aed9b172c0bf8e4'] = { clients: ['+37378589658'], last_updated: new Date().toISOString() };
+      contestDrivers['7aed9b172c0bf8e4'] = {
+        clients: ["+37378589658", "+37367601582", "+37376948314", "+37376948318", "+37376948310"],
+        last_updated: new Date().toISOString()
+      };
+      saveContestDrivers();
     }
     const cfg = await persist.load('config', CONFIG_FILE);
     if (cfg) {
