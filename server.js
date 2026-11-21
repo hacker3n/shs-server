@@ -192,73 +192,6 @@ function normalizePhone(raw) {
   return '+' + digits;
 }
 
-// Memorie & Persistență Concurs Șoferi (Contorizare clienți adăugați per dispozitiv)
-const CONTEST_DRIVERS_FILE = path.join(__dirname, 'contest_drivers.json');
-let contestDrivers = {};
-
-const INITIAL_TABLET_CLIENTS = [
-  "+37378589658", "+37367601582", "+37376948314", "+37376948318", "+37376948310",
-  "+37368853033", "+37368012345", "+37369112233", "+37360223344", "+37379334455",
-  "+37368445566", "+37369556677", "+37360667788", "+37379778899", "+37368889900",
-  "+37369990011", "+37360001122", "+37379112233", "+37368223344", "+37369334455"
-];
-
-function loadContestDrivers() {
-  try {
-    if (fs.existsSync(CONTEST_DRIVERS_FILE)) {
-      const data = JSON.parse(fs.readFileSync(CONTEST_DRIVERS_FILE, 'utf8'));
-      if (data && data["2c2505df036a2fd0"]) {
-        const cur = data["2c2505df036a2fd0"].clients || [];
-        if (cur.length < 20) {
-          data["2c2505df036a2fd0"].clients = Array.from(new Set([...cur, ...INITIAL_TABLET_CLIENTS]));
-        }
-      }
-      return data;
-    }
-  } catch (e) {
-    console.error('Eroare la încărcarea contest_drivers.json:', e.message);
-  }
-  return {
-    "2c2505df036a2fd0": {
-      "clients": INITIAL_TABLET_CLIENTS,
-      "last_updated": new Date().toISOString()
-    },
-    "7aed9b172c0bf8e4": {
-      "clients": ["+37378589658", "+37367601582", "+37376948314", "+37376948318", "+37376948310"],
-      "last_updated": new Date().toISOString()
-    }
-  };
-}
-
-function saveContestDrivers() {
-  try {
-    persist.save('contest_drivers', contestDrivers, CONTEST_DRIVERS_FILE);
-  } catch (e) {
-    console.error('Eroare la salvarea contest_drivers.json:', e.message);
-  }
-}
-
-contestDrivers = loadContestDrivers();
-
-function recordContestClient(deviceId, rawPhone) {
-  if (!deviceId || !rawPhone) return;
-  const phone = normalizePhone(rawPhone) || rawPhone;
-  if (!phone || phone.length < 5) return;
-
-  if (!contestDrivers[deviceId]) {
-    contestDrivers[deviceId] = { clients: [], last_updated: new Date().toISOString() };
-  }
-  if (!Array.isArray(contestDrivers[deviceId].clients)) {
-    contestDrivers[deviceId].clients = [];
-  }
-  if (!contestDrivers[deviceId].clients.includes(phone)) {
-    contestDrivers[deviceId].clients.push(phone);
-    contestDrivers[deviceId].last_updated = new Date().toISOString();
-    saveContestDrivers();
-    console.log(`[CONTEST] Dispozitiv ${deviceId} a adăugat clientul ${phone}. Total: ${contestDrivers[deviceId].clients.length}`);
-  }
-}
-
 function getClientIp(req) {
   if (!req) return '';
   const candidates = [];
@@ -1272,251 +1205,82 @@ app.post('/api/events/list', async (req, res) => {
   res.json({ ok: true, events: [] });
 });
 
-let contestBaseCache = { data: null, ts: 0 };
-
-async function getBaseContest() {
-  const now = Date.now();
-  if (contestBaseCache.data && (now - contestBaseCache.ts < 60000)) {
-    return contestBaseCache.data;
-  }
-  try {
-    const data = await fetchFromRailway('/api/contest', {});
-    if (data && data.ok) {
-      contestBaseCache.data = data;
-      contestBaseCache.ts = now;
-      return data;
-    }
-  } catch (e) {}
-  if (contestBaseCache.data) return contestBaseCache.data;
-  return {
-    ok: true,
-    on: true,
-    prize: "Радар на месяц + 7 дней «Отмены»",
-    ends: "22.11.2026",
-    top: [
-      { place: 1, name: "Igor", n: 77, me: false },
-      { place: 2, name: "Водитель …79d7", n: 73, me: false },
-      { place: 3, name: "Водитель …3d39", n: 27, me: false },
-      { place: 4, name: "Водитель …7dcc", n: 24, me: false },
-      { place: 5, name: "Водитель …9e72", n: 18, me: false }
-    ]
-  };
-}
-
-function buildContestResponse(base, deviceId) {
-  const myCount = (deviceId && contestDrivers[deviceId] && Array.isArray(contestDrivers[deviceId].clients))
-    ? contestDrivers[deviceId].clients.length
-    : 0;
-
-  // Obținem lista de top de bază
-  let baseTop = Array.isArray(base.top) ? JSON.parse(JSON.stringify(base.top)) : [];
-
-  // Construim lista combinată de participanți
-  let allEntries = baseTop.map(item => ({
-    name: item.name,
-    n: item.n,
-    me: false,
-    id: null
-  }));
-
-  // Adăugăm toți șoferii noștri din contestDrivers care au clienți
-  for (const [dId, dData] of Object.entries(contestDrivers)) {
-    const count = (dData && Array.isArray(dData.clients)) ? dData.clients.length : 0;
-    if (count > 0) {
-      const dev = devices[dId] || {};
-      let driverName = dev.driver_name || dev.name;
-      if (!driverName || driverName.length < 3) {
-        driverName = 'Водитель …' + dId.slice(-4);
-      }
-      const isMe = (dId === deviceId);
-
-      allEntries.push({
-        name: driverName,
-        n: count,
-        me: isMe,
-        id: dId
-      });
-    }
-  }
-
-  // Sortăm descrescător după numărul de clienți (n)
-  allEntries.sort((a, b) => b.n - a.n);
-
-  // Eliminăm duplicate
-  let uniqueEntries = [];
-  let seen = new Set();
-  for (const e of allEntries) {
-    const key = e.id || e.name;
-    if (!seen.has(key)) {
-      seen.add(key);
-      uniqueEntries.push(e);
-    }
-  }
-
-  // Atribuim locurile (1, 2, 3...)
-  for (let i = 0; i < uniqueEntries.length; i++) {
-    uniqueEntries[i].place = i + 1;
-  }
-
-  let myPlace = null;
-  if (myCount > 0) {
-    const myItem = uniqueEntries.find(e => e.me || e.id === deviceId);
-    if (myItem) {
-      myPlace = myItem.place;
-    }
-  }
-
-  // Primii 5 clasați pentru ecranul concursului
-  const top = uniqueEntries.slice(0, 5).map(e => ({
-    place: e.place,
-    name: e.name,
-    n: e.n,
-    me: (e.id === deviceId) || !!e.me
-  }));
-
-  return {
-    ok: true,
-    on: base.on !== undefined ? base.on : true,
-    prize: base.prize || "Радар на месяц + 7 дней «Отмены»",
-    ends: base.ends || "22.11.2026",
-    mine: {
-      n: myCount,
-      place: myPlace,
-      added: myCount
-    },
-    top: top
-  };
-}
-
 app.post('/api/contest', async (req, res) => {
-  const deviceId = sanitizeDeviceId(req.body ? req.body.device_id : '') || req.headers['x-device-id'];
-  if (deviceId && req.body && Array.isArray(req.body.numbers)) {
-    for (const n of req.body.numbers) {
-      recordContestClient(deviceId, n);
-    }
+  const now = Date.now();
+  if (contestCache.data && (now - contestCache.ts < 60000)) {
+    return res.json(contestCache.data);
   }
-  const base = await getBaseContest();
-  const response = buildContestResponse(base, deviceId);
-  return res.json(response);
+  const data = await fetchFromRailway('/api/contest', req.body);
+  if (data && data.ok) {
+    contestCache.data = data;
+    contestCache.ts = now;
+    return res.json(data);
+  }
+  if (contestCache.data) return res.json(contestCache.data);
+  res.json({ ok: true, on: false, top: [] });
 });
 
-app.post('/api/clients/call', async (req, res) => {
-  const deviceId = sanitizeDeviceId(req.body ? req.body.device_id : '') || req.headers['x-device-id'];
-  const rawPhone = (req.body && req.body.phone ? req.body.phone : '').trim();
-  if (deviceId && rawPhone) {
-    recordContestClient(deviceId, rawPhone);
-  }
-  let data = null;
-  try {
-    data = await fetchFromRailway('/api/clients/call', req.body);
-  } catch (e) {}
-  if (!data) data = { ok: true };
-
-  const base = await getBaseContest();
-  data.contest = buildContestResponse(base, deviceId);
-  return res.json(data);
-});
-
-app.post(['/api/chat/*', '/api/places/*', '/api/help/*', '/api/reports/*', '/api/trips/*', '/api/scout/*'], async (req, res) => {
+app.post(['/api/clients/call', '/api/chat/*', '/api/places/*', '/api/help/*', '/api/reports/*', '/api/trips/*', '/api/scout/*'], async (req, res) => {
   const data = await fetchFromRailway(req.path, req.body);
   if (data) return res.json(data);
   res.json({ ok: true });
 });
 
-// 10. Verificare Numere Clienți
+// 10. Verificare Numere Clienți (Conectat direct cu baza Railway originală)
 app.post('/api/clients/check', async (req, res) => {
   const rawPhone = (req.body.phone || '').trim();
   const deviceId = sanitizeDeviceId(req.body.device_id);
   const phone = normalizePhone(rawPhone) || rawPhone;
 
-  if (deviceId && phone) {
-    recordContestClient(deviceId, phone);
-  }
-
-  let clientData = clients[phone] || clients[rawPhone];
-  if (!clientData) {
-    const digits8 = phone.slice(-8);
-    for (const p in clients) {
-      if (p.endsWith(digits8)) {
-        clientData = clients[p];
-        break;
-      }
-    }
-  }
-
-  // Întotdeauna verificăm pe serverul original Railway dacă numărul nu există local sau nu are recenzii/etichete
-  const hasLocalDetails = clientData && ((clientData.reviews && clientData.reviews.length > 0) || (clientData.tags && Object.keys(clientData.tags).length > 0));
-
-  if (!hasLocalDetails && phone) {
+  if (phone) {
     try {
-      const origData = await fetchFromRailway('/api/clients/check', { phone: phone });
+      const origData = await fetchFromRailway('/api/clients/check', { phone: phone, device_id: deviceId });
       if (origData && origData.ok) {
         if (!clients[phone]) {
           clients[phone] = { tags: {}, userTags: {}, reviews: [] };
         }
-
-        // Fuzionăm etichetele primite de pe Railway
-        if (origData.tags && typeof origData.tags === 'object') {
-          for (const [t, count] of Object.entries(origData.tags)) {
-            clients[phone].tags[t] = Math.max(clients[phone].tags[t] || 0, count);
-          }
+        clients[phone].tags = origData.tags || {};
+        if (!clients[phone].userTags) clients[phone].userTags = {};
+        clients[phone].userTags[deviceId] = origData.mine || [];
+        if (Array.isArray(origData.reviews)) {
+          clients[phone].reviews = origData.reviews;
         }
-
-        // Fuzionăm recenziile primite de pe Railway
-        if (Array.isArray(origData.reviews) && origData.reviews.length > 0) {
-          const existingTexts = new Set((clients[phone].reviews || []).map(r => (r.text || '').trim()));
-          for (const r of origData.reviews) {
-            const cleanText = (r.text || '').trim();
-            if (cleanText && !existingTexts.has(cleanText)) {
-              if (!clients[phone].reviews) clients[phone].reviews = [];
-              clients[phone].reviews.push({
-                text: cleanText,
-                ts: r.ts || new Date().toISOString(),
-                device_id: 'railway',
-                admin: !!r.admin
-              });
-              existingTexts.add(cleanText);
-            }
-          }
-        }
-
         saveClients();
-        clientData = clients[phone];
+        return res.json(origData);
       }
-    } catch (e) {
-      // Ignorăm eroarea railway fallback la local
-    }
+    } catch (e) {}
   }
 
-  if (!clientData) {
+  // Fallback local dacă Railway este temporar indisponibil
+  let clientData = clients[phone] || clients[rawPhone];
+  if (clientData) {
+    const mine = (clientData.userTags && clientData.userTags[deviceId]) || [];
+    const reviews = (clientData.reviews || []).map(r => ({
+      text: r.text || '',
+      ts: r.ts || new Date().toISOString(),
+      mine: r.device_id === deviceId,
+      admin: !!r.admin
+    }));
     return res.json({
       ok: true,
       phone: phone,
-      tags: {},
-      mine: [],
-      reviews: []
+      tags: clientData.tags || {},
+      mine: mine,
+      reviews: reviews
     });
   }
-
-  const mine = (clientData.userTags && clientData.userTags[deviceId]) || [];
-  const reviews = (clientData.reviews || []).map(r => ({
-    text: r.text || '',
-    ts: r.ts || new Date().toISOString(),
-    mine: r.device_id === deviceId,
-    admin: !!r.admin
-  }));
 
   res.json({
     ok: true,
     phone: phone,
-    tags: clientData.tags || {},
-    mine: mine,
-    reviews: reviews
+    tags: {},
+    mine: [],
+    reviews: []
   });
 });
 
-// 11. Adăugare Recenzie Client
-app.post('/api/clients/review', (req, res) => {
+// 11. Adăugare Recenzie Client (Salvat direct pe serverul original Railway)
+app.post('/api/clients/review', async (req, res) => {
   const rawPhone = (req.body.phone || '').trim();
   const text = (req.body.text || '').trim();
   const deviceId = sanitizeDeviceId(req.body.device_id);
@@ -1526,13 +1290,21 @@ app.post('/api/clients/review', (req, res) => {
     return res.json({ ok: false, message: 'Date incomplete' });
   }
 
-  if (deviceId) {
-    recordContestClient(deviceId, phone);
+  // Trimitem direct către serverul original Railway
+  let railwayData = null;
+  try {
+    railwayData = await fetchFromRailway('/api/clients/review', { phone: phone, text: text, device_id: deviceId });
+  } catch (e) {}
+
+  if (railwayData && railwayData.ok) {
+    if (!clients[phone]) clients[phone] = { tags: {}, userTags: {}, reviews: [] };
+    clients[phone].reviews = railwayData.reviews || [];
+    saveClients();
+    return res.json(railwayData);
   }
 
-  if (!clients[phone]) {
-    clients[phone] = { tags: {}, userTags: {}, reviews: [] };
-  }
+  // Fallback local
+  if (!clients[phone]) clients[phone] = { tags: {}, userTags: {}, reviews: [] };
   if (!clients[phone].reviews) clients[phone].reviews = [];
 
   clients[phone].reviews.unshift({
@@ -1542,9 +1314,6 @@ app.post('/api/clients/review', (req, res) => {
     admin: false
   });
   saveClients();
-
-  // Trimitem asincron recenzia și către serverul Railway pentru comunitatea generală
-  fetchFromRailway('/api/clients/review', { phone: phone, text: text }).catch(() => {});
 
   const mine = (clients[phone].userTags && clients[phone].userTags[deviceId]) || [];
   const reviews = clients[phone].reviews.map(r => ({
@@ -1563,8 +1332,8 @@ app.post('/api/clients/review', (req, res) => {
   });
 });
 
-// 12. Adăugare / Modificare Etichetă (Tag) Client
-app.post('/api/clients/tag', (req, res) => {
+// 12. Adăugare / Modificare Etichetă (Tag) Client (Salvat direct pe serverul original Railway)
+app.post('/api/clients/tag', async (req, res) => {
   const rawPhone = (req.body.phone || '').trim();
   const tag = (req.body.tag || '').trim();
   const on = req.body.on !== undefined ? !!req.body.on : (req.body.value !== false);
@@ -1575,13 +1344,23 @@ app.post('/api/clients/tag', (req, res) => {
     return res.json({ ok: false, message: 'Date incomplete' });
   }
 
-  if (deviceId && on) {
-    recordContestClient(deviceId, phone);
+  // Trimitem direct către serverul original Railway
+  let railwayData = null;
+  try {
+    railwayData = await fetchFromRailway('/api/clients/tag', { phone: phone, tag: tag, on: on, device_id: deviceId });
+  } catch (e) {}
+
+  if (railwayData && railwayData.ok) {
+    if (!clients[phone]) clients[phone] = { tags: {}, userTags: {}, reviews: [] };
+    clients[phone].tags = railwayData.tags || {};
+    if (!clients[phone].userTags) clients[phone].userTags = {};
+    clients[phone].userTags[deviceId] = railwayData.mine || [];
+    saveClients();
+    return res.json(railwayData);
   }
 
-  if (!clients[phone]) {
-    clients[phone] = { tags: {}, userTags: {}, reviews: [] };
-  }
+  // Fallback local
+  if (!clients[phone]) clients[phone] = { tags: {}, userTags: {}, reviews: [] };
   if (!clients[phone].tags) clients[phone].tags = {};
   if (!clients[phone].userTags) clients[phone].userTags = {};
   if (!clients[phone].userTags[deviceId]) clients[phone].userTags[deviceId] = [];
@@ -1600,9 +1379,6 @@ app.post('/api/clients/tag', (req, res) => {
     }
   }
   saveClients();
-
-  // Trimitem asincron eticheta și către serverul Railway
-  fetchFromRailway('/api/clients/tag', { phone: phone, tag: tag, on: on }).catch(() => {});
 
   const reviews = (clients[phone].reviews || []).map(r => ({
     text: r.text || '',
@@ -4028,25 +3804,6 @@ app.get('/api/admin/crashes', (req, res) => {
     }
     const cl = await persist.load('clients', CLIENTS_FILE);
     if (cl) clients = cl;
-    const cd = await persist.load('contest_drivers', CONTEST_DRIVERS_FILE);
-    if (cd) {
-      contestDrivers = Object.assign({}, contestDrivers, cd);
-    }
-    if (!contestDrivers['2c2505df036a2fd0'] || contestDrivers['2c2505df036a2fd0'].clients.length < 20) {
-      const cur = (contestDrivers['2c2505df036a2fd0'] && contestDrivers['2c2505df036a2fd0'].clients) || [];
-      contestDrivers['2c2505df036a2fd0'] = {
-        clients: Array.from(new Set([...cur, ...INITIAL_TABLET_CLIENTS])),
-        last_updated: new Date().toISOString()
-      };
-      saveContestDrivers();
-    }
-    if (!contestDrivers['7aed9b172c0bf8e4']) {
-      contestDrivers['7aed9b172c0bf8e4'] = {
-        clients: ["+37378589658", "+37367601582", "+37376948314", "+37376948318", "+37376948310"],
-        last_updated: new Date().toISOString()
-      };
-      saveContestDrivers();
-    }
     const cfg = await persist.load('config', CONFIG_FILE);
     if (cfg) {
       appConfig = Object.assign({}, appConfig, cfg);
@@ -4060,8 +3817,7 @@ app.get('/api/admin/crashes', (req, res) => {
   process.on('SIGTERM', async () => {
     await persist.flushAll({
       devices: () => devices, ip_registry: () => ipRegistry,
-      deleted: () => deletedDevices, clients: () => clients, config: () => appConfig,
-      contest_drivers: () => contestDrivers
+      deleted: () => deletedDevices, clients: () => clients, config: () => appConfig
     });
     process.exit(0);
   });
