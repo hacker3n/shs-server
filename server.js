@@ -617,11 +617,11 @@ function loadConfig() {
   if (!cfg) {
     cfg = {
       admin_password: "shs2026",
-      latest_version_code: 1,
-      latest_version_name: "1.0",
+      latest_version_code: 42,
+      latest_version_name: "2.6.6",
       min_version_code: 1,
       update_url: "https://shs-server.onrender.com/download/SHS_Final.apk",
-      update_notes: "Versiunea 1.0: Radar stabil, deconectare automată la expirare, interfață nouă compactă.",
+      update_notes: "Versiunea 2.6.6: Automatizare apel Yandex Pro complet rezolvată pentru orice dialer (Lenovo, Eyecon, Xiaomi, etc.) la fiecare apel.",
       shared_geocoder: true,
       telegram: "neki002",
       phone: "",
@@ -691,6 +691,9 @@ function isAuthenticated(req) {
 
 // 1. Config & Update Check
 app.get('/api/app-config', (req, res) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
   const resp = {
     ...appConfig,
     apk_url: appConfig.update_url,
@@ -704,9 +707,12 @@ app.get('/api/app-config', (req, res) => {
 });
 
 // Endpoint direct pentru descărcarea APK-ului pe telefoane
-app.get(['/download/SHS_Final.apk', '/SHS_Final.apk'], (req, res) => {
+app.get(['/download/SHS_Final.apk', '/SHS_Final.apk', '/download/SHS_Final_2.6.6.apk', '/SHS_Final_2.6.6.apk'], (req, res) => {
   const apkPath = path.join(__dirname, 'SHS_Final.apk');
   if (fs.existsSync(apkPath)) {
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
     return res.download(apkPath, 'SHS_Final.apk');
   }
   res.status(404).send('APK-ul nu a fost găsit pe server.');
