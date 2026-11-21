@@ -1052,8 +1052,8 @@ app.post('/api/pay/status', (req, res) => {
 // ==========================================
 
 let railwaySession = {
-  deviceId: '62ab0a240ae3435d',
-  expires: 1794154370533
+  deviceId: null,
+  expires: 0
 };
 
 async function getRailwayActiveDeviceId() {
@@ -1066,7 +1066,7 @@ async function getRailwayActiveDeviceId() {
     const crypto = require('crypto');
     const newId = crypto.randomBytes(8).toString('hex');
     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    const timer = controller ? setTimeout(() => controller.abort(), 5000) : null;
+    const timer = controller ? setTimeout(() => controller.abort(), 6000) : null;
 
     const fetchFn = typeof fetch === 'function' ? fetch : (await import('node-fetch')).default;
     const resp = await fetchFn('https://taxi-radar-license-production.up.railway.app/api/request-trial', {
@@ -1096,13 +1096,13 @@ async function getRailwayActiveDeviceId() {
   return railwaySession.deviceId || '62ab0a240ae3435d';
 }
 
-async function fetchFromRailway(path, payload) {
+async function fetchFromRailway(path, payload, isRetry = false) {
   try {
     const railwayId = await getRailwayActiveDeviceId();
     const payloadWithDevice = Object.assign({}, payload, { device_id: railwayId });
 
     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    const timer = controller ? setTimeout(() => controller.abort(), 5500) : null;
+    const timer = controller ? setTimeout(() => controller.abort(), 6500) : null;
 
     const fetchFn = typeof fetch === 'function' ? fetch : (await import('node-fetch')).default;
     const resp = await fetchFn(`https://taxi-radar-license-production.up.railway.app${path}`, {
@@ -1118,16 +1118,92 @@ async function fetchFromRailway(path, payload) {
 
     if (resp && resp.ok) {
       const data = await resp.json();
+      if (data && data.ok === false && data.message && (data.message.includes('подписк') || data.message.includes('триал')) && !isRetry) {
+        railwaySession.deviceId = null;
+        railwaySession.expires = 0;
+        return fetchFromRailway(path, payload, true);
+      }
       return data;
     } else if (resp && (resp.status === 400 || resp.status === 403)) {
       railwaySession.deviceId = null;
       railwaySession.expires = 0;
+      if (!isRetry) {
+        return fetchFromRailway(path, payload, true);
+      }
     }
   } catch (err) {
     // Timeout sau eroare de conexiune cu Railway
   }
   return null;
 }
+
+// Cache-uri în memorie pentru Comunitate
+let airportCache = { data: null, ts: 0 };
+let eventsCache = { data: null, ts: 0 };
+let contestCache = { data: null, ts: 0 };
+
+app.post('/api/airport/status', async (req, res) => {
+  const now = Date.now();
+  if (airportCache.data && (now - airportCache.ts < 60000)) {
+    return res.json(airportCache.data);
+  }
+  const data = await fetchFromRailway('/api/airport/status', req.body);
+  if (data && data.ok) {
+    airportCache.data = data;
+    airportCache.ts = now;
+    return res.json(data);
+  }
+  if (airportCache.data) return res.json(airportCache.data);
+  res.json({ ok: true, queue: 0, taxi_queue: { econom: null, comfort: null, comfortplus: null }, flights: [] });
+});
+
+app.post('/api/airport/queue', async (req, res) => {
+  const data = await fetchFromRailway('/api/airport/queue', req.body);
+  if (data) return res.json(data);
+  res.json({ ok: true });
+});
+
+app.post('/api/airport/ping', async (req, res) => {
+  const data = await fetchFromRailway('/api/airport/ping', req.body);
+  if (data) return res.json(data);
+  res.json({ ok: true });
+});
+
+app.post('/api/events/list', async (req, res) => {
+  const now = Date.now();
+  if (eventsCache.data && (now - eventsCache.ts < 180000)) {
+    return res.json(eventsCache.data);
+  }
+  const data = await fetchFromRailway('/api/events/list', req.body);
+  if (data && data.ok) {
+    eventsCache.data = data;
+    eventsCache.ts = now;
+    return res.json(data);
+  }
+  if (eventsCache.data) return res.json(eventsCache.data);
+  res.json({ ok: true, events: [] });
+});
+
+app.post('/api/contest', async (req, res) => {
+  const now = Date.now();
+  if (contestCache.data && (now - contestCache.ts < 60000)) {
+    return res.json(contestCache.data);
+  }
+  const data = await fetchFromRailway('/api/contest', req.body);
+  if (data && data.ok) {
+    contestCache.data = data;
+    contestCache.ts = now;
+    return res.json(data);
+  }
+  if (contestCache.data) return res.json(contestCache.data);
+  res.json({ ok: true, on: false, top: [] });
+});
+
+app.post(['/api/clients/call', '/api/chat/*', '/api/places/*', '/api/help/*', '/api/reports/*', '/api/trips/*', '/api/scout/*'], async (req, res) => {
+  const data = await fetchFromRailway(req.path, req.body);
+  if (data) return res.json(data);
+  res.json({ ok: true });
+});
 
 // 10. Verificare Numere Clienți
 app.post('/api/clients/check', async (req, res) => {
