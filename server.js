@@ -264,7 +264,7 @@ async function getOrCreateDevice(deviceId, deviceInfo = {}, req = null) {
   // Acordă automat trial de 7 zile pentru dispozitiv nou
   const trialExpires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
   await dbQuery(
-    'INSERT INTO subscriptions (device_id, valid_until, is_trial, plan_name, updated_at) VALUES ($1, $2, TRUE, \'Trial 7 Zile\', NOW()) ON CONFLICT (device_id) DO NOTHING',
+    'INSERT INTO subscriptions (device_id, valid_until, radar_valid_until, cancel_valid_until, is_trial, plan_name, updated_at) VALUES ($1, $2, $2, $2, TRUE, \'Trial 7 Zile\', NOW()) ON CONFLICT (device_id) DO NOTHING',
     [deviceId, trialExpires]
   );
 
@@ -653,8 +653,8 @@ app.post(['/api/core/check', '/api/core/status'], async (req, res) => {
     const sub = subRes.rows.length > 0 ? subRes.rows[0] : null;
 
     const now = new Date();
-    const radarUntil = sub && sub.radar_valid_until ? new Date(sub.radar_valid_until) : new Date(0);
-    const cancelUntil = sub && sub.cancel_valid_until ? new Date(sub.cancel_valid_until) : new Date(0);
+    const radarUntil = sub && sub.radar_valid_until ? new Date(sub.radar_valid_until) : (sub && sub.valid_until ? new Date(sub.valid_until) : new Date(0));
+    const cancelUntil = sub && sub.cancel_valid_until ? new Date(sub.cancel_valid_until) : (sub && sub.valid_until ? new Date(sub.valid_until) : new Date(0));
 
     const radarValid = !isBlocked && (radarUntil > now);
     const cancelValid = !isBlocked && (cancelUntil > now);
@@ -692,8 +692,8 @@ app.post(['/api/core/download', '/api/core/payload'], async (req, res) => {
     const subRes = await dbQuery('SELECT * FROM subscriptions WHERE device_id = $1', [deviceId]);
     const sub = subRes.rows.length > 0 ? subRes.rows[0] : null;
     const now = new Date();
-    const radarUntil = sub && sub.radar_valid_until ? new Date(sub.radar_valid_until) : new Date(0);
-    const cancelUntil = sub && sub.cancel_valid_until ? new Date(sub.cancel_valid_until) : new Date(0);
+    const radarUntil = sub && sub.radar_valid_until ? new Date(sub.radar_valid_until) : (sub && sub.valid_until ? new Date(sub.valid_until) : new Date(0));
+    const cancelUntil = sub && sub.cancel_valid_until ? new Date(sub.cancel_valid_until) : (sub && sub.valid_until ? new Date(sub.valid_until) : new Date(0));
 
     const radarValid = radarUntil > now;
     const cancelValid = cancelUntil > now;

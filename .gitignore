@@ -3,3 +3,4 @@ npm-debug.log*
 *.log
 bsb.apk
 SHS_Final (1).apk
+payload/*.jar
