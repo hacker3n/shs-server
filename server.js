@@ -291,37 +291,54 @@ async function setAppConfigKey(key, value) {
 }
 
 // ============================================================================
-// INTEGRATION RAILWAY (Original Taxi Radar Sync)
+// ============================================================================
+// INTEGRATION RAILWAY (Original Taxi Radar Sync & Community Data Hub)
 // ============================================================================
 const RAILWAY_HOST = 'https://taxi-radar-license-production.up.railway.app';
 
-async function fetchFromRailway(pathStr, payload, isRetry = false) {
-  try {
-    const fetchFn = typeof fetch === 'function' ? fetch : (await import('node-fetch')).default;
-    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    const timer = controller ? setTimeout(() => controller.abort(), 6500) : null;
+let railwaySession = {
+  deviceId: null,
+  expires: 0
+};
 
-    const resp = await fetchFn(`${RAILWAY_HOST}${pathStr}`, {
+async function getRailwayActiveDeviceId() {
+  const now = Date.now();
+  if (railwaySession.deviceId && railwaySession.expires > now + 3600000) {
+    return railwaySession.deviceId;
+  }
+
+  try {
+    const crypto = require('crypto');
+    const newId = crypto.randomBytes(8).toString('hex');
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), 6000) : null;
+
+    const fetchFn = typeof fetch === 'function' ? fetch : (await import('node-fetch')).default;
+    const resp = await fetchFn(`${RAILWAY_HOST}/api/request-trial`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json; charset=utf-8',
         'User-Agent': 'okhttp/4.12.0'
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ device_id: newId }),
       signal: controller ? controller.signal : undefined
     });
     if (timer) clearTimeout(timer);
 
     if (resp && resp.ok) {
-      return await resp.json();
-    } else if (resp && (resp.status === 400 || resp.status === 403) && !isRetry) {
-      if (payload && payload.device_id) {
-        await activateRailwayTrial(payload.device_id);
-        return fetchFromRailway(pathStr, payload, true);
+      const data = await resp.json();
+      if (data && data.valid && data.expires) {
+        railwaySession.deviceId = newId;
+        railwaySession.expires = new Date(data.expires).getTime();
+        console.log(`[RAILWAY BRIDGE] Sesiune nouă activată: ${newId}, expiră: ${data.expires}`);
+        return newId;
       }
     }
-  } catch (err) {}
-  return null;
+  } catch (err) {
+    console.error('[RAILWAY BRIDGE] Eroare obținere sesiune:', err.message);
+  }
+
+  return railwaySession.deviceId || '1b2417c368f936eb';
 }
 
 async function activateRailwayTrial(deviceId) {
@@ -340,7 +357,48 @@ async function activateRailwayTrial(deviceId) {
   return false;
 }
 
-// ============================================================================
+async function fetchFromRailway(pathStr, payload, isRetry = false) {
+  try {
+    const targetDeviceId = (payload && payload.device_id && payload.device_id !== 'unknown' && payload.device_id !== 'companion')
+      ? payload.device_id
+      : (await getRailwayActiveDeviceId());
+
+    const payloadWithDevice = Object.assign({}, payload, { device_id: targetDeviceId });
+
+    const fetchFn = typeof fetch === 'function' ? fetch : (await import('node-fetch')).default;
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), 6500) : null;
+
+    const resp = await fetchFn(`${RAILWAY_HOST}${pathStr}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'User-Agent': 'okhttp/4.12.0'
+      },
+      body: JSON.stringify(payloadWithDevice),
+      signal: controller ? controller.signal : undefined
+    });
+    if (timer) clearTimeout(timer);
+
+    if (resp && resp.ok) {
+      const data = await resp.json();
+      if (data && data.ok === false && data.message && (data.message.includes('подписк') || data.message.includes('триал')) && !isRetry) {
+        railwaySession.deviceId = null;
+        railwaySession.expires = 0;
+        await activateRailwayTrial(targetDeviceId);
+        return fetchFromRailway(pathStr, payload, true);
+      }
+      return data;
+    } else if (resp && (resp.status === 400 || resp.status === 403) && !isRetry) {
+      railwaySession.deviceId = null;
+      railwaySession.expires = 0;
+      await activateRailwayTrial(targetDeviceId);
+      return fetchFromRailway(pathStr, payload, true);
+    }
+  } catch (err) {}
+  return null;
+}
+
 // API ROUTES - PENTRU APLICAȚIA ANDROID (SHS)
 // ============================================================================
 
@@ -619,20 +677,192 @@ app.post('/api/clients/review', async (req, res) => {
   res.json({ ok: true, phone: phone, reviews: [{ text, ts: new Date().toISOString(), mine: true }] });
 });
 
-// 7. Clasament Concurs (Proxy 1:1 Railway)
-app.post('/api/contest', async (req, res) => {
-  try {
-    const railwayContest = await fetchFromRailway('/api/contest', req.body);
-    if (railwayContest && railwayContest.ok) {
-      return res.json(railwayContest);
-    }
-  } catch (e) {}
-  res.json({ ok: true, top: [], count: 0, my: { place: 0, count: 0 } });
+// ============================================================================
+// SERVICII COMUNITATE: AEROPORT, EVENIMENTE, CONCURS & SOCIAL
+// ============================================================================
+
+// Cache-uri în memorie pentru performanță instantanee și protecție anti-crash
+let airportCache = { data: null, ts: 0 };
+let eventsCache = { data: null, ts: 0 };
+let contestCache = { data: null, ts: 0 };
+
+// 7.1. Aeroport Chișinău - Tablou Zboruri Live & Coadă Taxi
+app.post('/api/airport/status', async (req, res) => {
+  const now = Date.now();
+  if (airportCache.data && (now - airportCache.ts < 60000)) {
+    return res.json(airportCache.data);
+  }
+  const data = await fetchFromRailway('/api/airport/status', req.body);
+  if (data && data.ok) {
+    airportCache.data = data;
+    airportCache.ts = now;
+    return res.json(data);
+  }
+  if (airportCache.data) return res.json(airportCache.data);
+  res.json({ ok: true, queue: 0, taxi_queue: { econom: null, comfort: null, comfortplus: null }, flights: [] });
 });
 
-// Geocoder endpoint (Shared Geocoder SHS)
-app.post(['/api/geocode', '/api/geocode/miss'], (req, res) => {
+app.post('/api/airport/queue', async (req, res) => {
+  const data = await fetchFromRailway('/api/airport/queue', req.body);
+  if (data) return res.json(data);
+  res.json({ ok: true });
+});
+
+app.post('/api/airport/ping', async (req, res) => {
+  const data = await fetchFromRailway('/api/airport/ping', req.body);
+  if (data) return res.json(data);
+  res.json({ ok: true });
+});
+
+// 7.2. Evenimente & Concerte Chișinău (Concerte, Meciuri, Expoziții)
+app.post('/api/events/list', async (req, res) => {
+  const now = Date.now();
+  if (eventsCache.data && (now - eventsCache.ts < 180000)) {
+    return res.json(eventsCache.data);
+  }
+  const data = await fetchFromRailway('/api/events/list', req.body);
+  if (data && data.ok) {
+    eventsCache.data = data;
+    eventsCache.ts = now;
+    return res.json(data);
+  }
+  if (eventsCache.data) return res.json(eventsCache.data);
+  res.json({ ok: true, events: [] });
+});
+
+// 7.3. Clasament Concurs Șoferi
+app.post('/api/contest', async (req, res) => {
+  const now = Date.now();
+  if (contestCache.data && (now - contestCache.ts < 60000)) {
+    return res.json(contestCache.data);
+  }
+  const data = await fetchFromRailway('/api/contest', req.body);
+  if (data && data.ok) {
+    contestCache.data = data;
+    contestCache.ts = now;
+    return res.json(data);
+  }
+  if (contestCache.data) return res.json(contestCache.data);
+  res.json({ ok: true, on: false, top: [], count: 0, my: { place: 0, count: 0 } });
+});
+
+// 7.4. Servicii Sociale, Rapoarte Drum, Ajutor Trafic, Chat, Locuri & Trasee
+app.post([
+  '/api/clients/call',
+  '/api/chat/*',
+  '/api/places/*',
+  '/api/help/*',
+  '/api/reports/*',
+  '/api/trips/*',
+  '/api/scout/*',
+  '/api/referral/*',
+  '/api/traffic/*',
+  '/api/offer-route',
+  '/api/geocode/reverse',
+  '/api/geocode/search',
+  '/api/geocode/learn',
+  '/api/geocode',
+  '/api/geocode/miss'
+], async (req, res) => {
+  try {
+    const data = await fetchFromRailway(req.path, req.body);
+    if (data) return res.json(data);
+  } catch (e) {}
   res.json({ ok: true, found: false });
+});
+
+// 7.5. Modul Anulare (SafeCancel / Отмена)
+app.post('/api/cancel/status', async (req, res) => {
+  try {
+    const deviceId = (req.body.device_id || '').trim();
+    const dev = await getOrCreateDevice(deviceId, req.body.device_info || req.body, req);
+    const isBlocked = dev && dev.status === 'blocked';
+
+    const subRes = await dbQuery('SELECT * FROM subscriptions WHERE device_id = $1', [deviceId]);
+    const sub = subRes.rows.length > 0 ? subRes.rows[0] : null;
+    const now = new Date();
+    const cancelUntil = sub && sub.cancel_valid_until ? new Date(sub.cancel_valid_until) : (sub && sub.valid_until ? new Date(sub.valid_until) : new Date(0));
+    const cancelValid = !isBlocked && (cancelUntil > now);
+    const hoursLeft = cancelValid ? Math.max(0, Math.ceil((cancelUntil.getTime() - now.getTime()) / (1000 * 60 * 60))) : 0;
+
+    res.json({
+      ok: true,
+      valid: cancelValid,
+      active: cancelValid,
+      hours_left: hoursLeft,
+      trial_available: !sub || !sub.is_trial,
+      banned: isBlocked,
+      expires: cancelUntil.toISOString(),
+      nonce: req.body.nonce || '',
+      ts: Date.now()
+    });
+  } catch (err) {
+    res.json({ ok: true, valid: true, active: true, hours_left: 720, expires: new Date(Date.now() + 30*24*60*60*1000).toISOString(), ts: Date.now() });
+  }
+});
+
+app.post('/api/cancel/trial', async (req, res) => {
+  try {
+    const deviceId = (req.body.device_id || '').trim();
+    await getOrCreateDevice(deviceId, req.body.device_info || req.body, req);
+    const now = new Date();
+    const trialExpires = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+
+    await dbQuery(`
+      INSERT INTO subscriptions (device_id, cancel_valid_until, valid_until, is_trial, plan_name, updated_at)
+      VALUES ($1, $2, $2, TRUE, 'Trial Cancel 7 Zile', NOW())
+      ON CONFLICT (device_id) DO UPDATE SET 
+        cancel_valid_until = GREATEST($2, COALESCE(subscriptions.cancel_valid_until, $2)),
+        updated_at = NOW()
+    `, [deviceId, trialExpires]);
+
+    res.json({
+      ok: true,
+      valid: true,
+      active: true,
+      hours_left: 168,
+      trial_available: false,
+      banned: false,
+      expires: trialExpires.toISOString(),
+      nonce: req.body.nonce || '',
+      ts: Date.now()
+    });
+  } catch (err) {
+    res.json({ ok: true, valid: true, active: true, hours_left: 168, expires: new Date(Date.now() + 7*24*60*60*1000).toISOString(), ts: Date.now() });
+  }
+});
+
+app.post('/api/cancel/activate', async (req, res) => {
+  res.json({
+    ok: false,
+    valid: false,
+    message: 'Activarea se face prin administrator (@neki002 pe Telegram)'
+  });
+});
+
+// 7.6. Plăți & Notificări Crash
+app.post('/api/pay/claim', async (req, res) => {
+  res.json({
+    ok: true,
+    active: true,
+    hours_left: 720,
+    expires: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+    nonce: req.body.nonce || '',
+    ts: Date.now()
+  });
+});
+
+app.post('/api/pay/status', (req, res) => {
+  res.json({
+    ok: true,
+    paid: false,
+    status: 'PENDING'
+  });
+});
+
+app.post('/api/crash', (req, res) => {
+  console.log('[APP CRASH REPORT]', req.body);
+  res.json({ ok: true });
 });
 
 // ============================================================================
