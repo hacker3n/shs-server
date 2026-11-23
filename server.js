@@ -868,7 +868,7 @@ app.post('/api/crash', (req, res) => {
 // ============================================================================
 // 8. Dynamic Remote Core Loader (Anti-Hack / Remote DEX & Separate Subscriptions)
 // ============================================================================
-const CORE_VERSION = "2.6.9.10";
+const CORE_VERSION = "2.6.9.11";
 
 // Verificare Licență Dispozitiv (Radar & Anulare Separate)
 app.post(['/api/core/check', '/api/core/status'], async (req, res) => {
