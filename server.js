@@ -860,9 +860,17 @@ app.post('/api/pay/status', (req, res) => {
   });
 });
 
+const recentCrashes = [];
+
 app.post('/api/crash', (req, res) => {
   console.log('[APP CRASH REPORT]', req.body);
+  recentCrashes.unshift({ at: new Date().toISOString(), body: req.body });
+  if (recentCrashes.length > 30) recentCrashes.pop();
   res.json({ ok: true });
+});
+
+app.get('/api/crashes', (req, res) => {
+  res.json({ ok: true, crashes: recentCrashes });
 });
 
 // ============================================================================
