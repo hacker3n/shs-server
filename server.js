@@ -960,7 +960,9 @@ app.post(['/api/core/download', '/api/core/payload'], async (req, res) => {
 app.get('/', (req, res) => res.redirect('/admin'));
 
 app.get('/download/SHS_Final.apk', (req, res) => {
-  const apkPath = path.join(__dirname, '..', '..', 'Apk', 'Modded Apk', 'SHS', 'SHS_Final.apk');
+  const payloadApk = path.join(__dirname, 'payload', 'SHS_Final.apk');
+  const localApk = path.join(__dirname, '..', '..', 'Apk', 'Modded Apk', 'SHS', 'SHS_Final.apk');
+  const apkPath = fs.existsSync(payloadApk) ? payloadApk : localApk;
   if (fs.existsSync(apkPath)) {
     res.download(apkPath, 'SHS_Final.apk');
   } else {
