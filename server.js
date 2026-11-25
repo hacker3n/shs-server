@@ -540,8 +540,8 @@ app.post(['/api/activate-device', '/api/license/activate'], async (req, res) => 
 app.get(['/api/app-config', '/api/app/config'], async (req, res) => {
   const cfg = await getAppConfig();
   res.json({
-    latest_version_code: parseInt(cfg.latest_version_code || '45', 10),
-    latest_version_name: cfg.latest_version_name || '2.6.9',
+    latest_version_code: Math.max(parseInt(cfg.latest_version_code || '46', 10), 46),
+    latest_version_name: '2.6.9.21',
     update_url: cfg.update_url || 'https://shs-server.onrender.com/download/SHS_Final.apk',
     apk_url: cfg.update_url || 'https://shs-server.onrender.com/download/SHS_Final.apk',
     update_notes: cfg.update_notes || '',
