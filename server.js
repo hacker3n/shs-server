@@ -540,8 +540,8 @@ app.post(['/api/activate-device', '/api/license/activate'], async (req, res) => 
 app.get(['/api/app-config', '/api/app/config'], async (req, res) => {
   const cfg = await getAppConfig();
   res.json({
-    latest_version_code: Math.max(parseInt(cfg.latest_version_code || '46', 10), 46),
-    latest_version_name: '2.6.9.21',
+    latest_version_code: Math.max(parseInt(cfg.latest_version_code || '47', 10), 47),
+    latest_version_name: '2.6.9.22',
     update_url: cfg.update_url || 'https://shs-server.onrender.com/download/SHS_Final.apk',
     apk_url: cfg.update_url || 'https://shs-server.onrender.com/download/SHS_Final.apk',
     update_notes: cfg.update_notes || '',
@@ -876,7 +876,7 @@ app.get('/api/crashes', (req, res) => {
 // ============================================================================
 // 8. Dynamic Remote Core Loader (Anti-Hack / Remote DEX & Separate Subscriptions)
 // ============================================================================
-const CORE_VERSION = "2.6.9.21";
+const CORE_VERSION = "2.6.9.22";
 
 // Verificare Licență Dispozitiv (Radar & Anulare Separate)
 app.post(['/api/core/check', '/api/core/status'], async (req, res) => {
